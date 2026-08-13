@@ -377,7 +377,7 @@ func TestChromeStoreSortOrderMultipleBrowsers(t *testing.T) {
 
 	// Verify that running the sort 100 times produces the same result.
 	// This catches any non-determinism in the sorting.
-	for run := 0; run < 100; run++ {
+	for run := range 100 {
 		names := make([]string, 0, len(browserStores))
 		for name := range browserStores {
 			names = append(names, name)
