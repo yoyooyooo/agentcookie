@@ -372,6 +372,67 @@ func TestDiscoverForConfig_AddsExplicitProfileDir(t *testing.T) {
 	}
 }
 
+// TestDiscoverForConfig_ScansUserDataDir verifies that when cdp.profile_dir
+// is a Chrome user-data-dir (containing Default/Profile N), DiscoverForConfig
+// scans those children the same way Discover scans standard roots.
+func TestDiscoverForConfig_ScansUserDataDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a user-data-dir with Default and Profile 1 subdirs (no Local State).
+	userDataDir := filepath.Join(t.TempDir(), "my-chrome-data")
+
+	// Default profile with Cookies.
+	defaultDir := filepath.Join(userDataDir, "Default")
+	if err := os.MkdirAll(defaultDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	defaultCookies := filepath.Join(defaultDir, "Cookies")
+	if err := os.WriteFile(defaultCookies, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Profile 1 with Network/Cookies.
+	profile1Dir := filepath.Join(userDataDir, "Profile 1")
+	networkDir := filepath.Join(profile1Dir, "Network")
+	if err := os.MkdirAll(networkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	profile1Cookies := filepath.Join(networkDir, "Cookies")
+	if err := os.WriteFile(profile1Cookies, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add a cache dir that should be skipped.
+	cacheDir := filepath.Join(userDataDir, "Cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := DiscoverForConfig(userDataDir)
+
+	// Should find both Default and Profile 1.
+	foundDefault := false
+	foundProfile1 := false
+	for _, s := range result.Stores {
+		if s.Root == userDataDir && s.Profile == "Default" && s.CookiesPath == defaultCookies {
+			foundDefault = true
+			if !s.IsDefault {
+				t.Error("Default profile should have IsDefault=true")
+			}
+		}
+		if s.Root == userDataDir && s.Profile == "Profile 1" && s.CookiesPath == profile1Cookies {
+			foundProfile1 = true
+		}
+	}
+	if !foundDefault {
+		t.Error("Default profile should be discovered from user-data-dir")
+	}
+	if !foundProfile1 {
+		t.Error("Profile 1 should be discovered from user-data-dir")
+	}
+}
+
 func TestProfileNameAllowlist(t *testing.T) {
 	cases := []struct {
 		name    string

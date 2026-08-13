@@ -277,7 +277,9 @@ func fileExists(path string) bool {
 
 // DiscoverForConfig returns stores that match the optional config constraints.
 // If profileDir is non-empty, it's treated as an explicit user-data-dir to
-// include in discovery.
+// include in discovery. If profileDir contains profile subdirectories (Default,
+// Profile N), those are scanned the same way Discover scans standard roots.
+// Otherwise, profileDir itself is probed as a profile.
 func DiscoverForConfig(profileDir string) DiscoverResult {
 	result := Discover()
 
@@ -286,6 +288,7 @@ func DiscoverForConfig(profileDir string) DiscoverResult {
 	if profileDir != "" {
 		abs, err := filepath.Abs(profileDir)
 		if err == nil {
+			// Check if any discovered stores already cover this path.
 			found := false
 			for _, s := range result.Stores {
 				if s.Root == abs || filepath.Join(s.Root, s.Profile) == abs {
@@ -294,26 +297,76 @@ func DiscoverForConfig(profileDir string) DiscoverResult {
 				}
 			}
 			if !found {
-				// Probe this directory directly as a profile root.
-				store, skipReason := probeProfileDir(
-					filepath.Dir(abs),
-					filepath.Base(abs),
-					abs,
-					browserForRoot(abs),
-					false,
-				)
-				if skipReason != "" {
-					result.Skipped = append(result.Skipped, SkippedStore{
-						Root:    filepath.Dir(abs),
-						Profile: filepath.Base(abs),
-						Reason:  skipReason,
-					})
-				} else if store != nil {
-					result.Stores = append(result.Stores, *store)
+				// First, try scanning profileDir as a user-data-dir with
+				// profile subdirectories (Default, Profile N, etc.).
+				addedFromChildren := scanUserDataDir(abs, &result)
+
+				// If no profile subdirs were found, probe the directory
+				// itself as a profile (e.g., a bare chrome-profile dir).
+				if !addedFromChildren {
+					store, skipReason := probeProfileDir(
+						filepath.Dir(abs),
+						filepath.Base(abs),
+						abs,
+						browserForRoot(abs),
+						false,
+					)
+					if skipReason != "" {
+						result.Skipped = append(result.Skipped, SkippedStore{
+							Root:    filepath.Dir(abs),
+							Profile: filepath.Base(abs),
+							Reason:  skipReason,
+						})
+					} else if store != nil {
+						result.Stores = append(result.Stores, *store)
+					}
 				}
 			}
 		}
 	}
 
 	return result
+}
+
+// scanUserDataDir scans root as a Chrome user-data-dir, looking for profile
+// subdirectories (Default, Profile N, etc.). Returns true if any profiles
+// were found (added or skipped), false if root doesn't look like a user-data-dir.
+func scanUserDataDir(root string, result *DiscoverResult) bool {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+
+	browser := browserForRoot(root)
+	foundProfiles := false
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+
+		if skipDirs[name] {
+			continue
+		}
+
+		if !profileNameAllowlist.MatchString(name) {
+			continue
+		}
+
+		foundProfiles = true
+		profileDir := filepath.Join(root, name)
+		store, skipReason := probeProfileDir(root, name, profileDir, browser, name == "Default")
+		if skipReason != "" {
+			result.Skipped = append(result.Skipped, SkippedStore{
+				Root:    root,
+				Profile: name,
+				Reason:  skipReason,
+			})
+		} else if store != nil {
+			result.Stores = append(result.Stores, *store)
+		}
+	}
+
+	return foundProfiles
 }

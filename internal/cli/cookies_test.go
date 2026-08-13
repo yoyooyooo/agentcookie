@@ -390,3 +390,62 @@ func TestChromeStoreSortOrderMultipleBrowsers(t *testing.T) {
 		}
 	}
 }
+
+// TestChromeStoreSortOrderCookiesPathTiebreaker verifies that when two stores
+// have the same browser, default-ness, and profile name (e.g., two Default
+// profiles from different roots), the one with the lexicographically earlier
+// CookiesPath wins (appears first and thus wins first-wins deduplication).
+func TestChromeStoreSortOrderCookiesPathTiebreaker(t *testing.T) {
+	stores := []chromepaths.Store{
+		{Browser: "chrome", Profile: "Default", IsDefault: false, CookiesPath: "/home/user/chrome-profile/Cookies"},
+		{Browser: "chrome", Profile: "Default", IsDefault: false, CookiesPath: "/home/user/.agentcookie/chrome-profile/Cookies"},
+		{Browser: "chrome", Profile: "Default", IsDefault: true, CookiesPath: "/home/user/.config/google-chrome/Default/Cookies"},
+	}
+
+	// Apply the same sort logic as collectDomainCookiesFromChrome.
+	sort.Slice(stores, func(i, j int) bool {
+		if stores[i].IsDefault != stores[j].IsDefault {
+			return stores[i].IsDefault
+		}
+		if stores[i].Profile != stores[j].Profile {
+			return stores[i].Profile < stores[j].Profile
+		}
+		return stores[i].CookiesPath < stores[j].CookiesPath
+	})
+
+	// Expected order:
+	// 1. IsDefault=true first (the standard Chrome Default)
+	// 2. Then the two IsDefault=false stores sorted by CookiesPath:
+	//    - /home/user/.agentcookie/chrome-profile/Cookies (lexically earlier)
+	//    - /home/user/chrome-profile/Cookies
+	expected := []string{
+		"/home/user/.config/google-chrome/Default/Cookies",
+		"/home/user/.agentcookie/chrome-profile/Cookies",
+		"/home/user/chrome-profile/Cookies",
+	}
+	for i, exp := range expected {
+		if stores[i].CookiesPath != exp {
+			t.Errorf("position %d: got %q, want %q", i, stores[i].CookiesPath, exp)
+		}
+	}
+
+	// Run 100 times to verify determinism.
+	for run := range 100 {
+		s := []chromepaths.Store{
+			{Browser: "chrome", Profile: "Default", IsDefault: false, CookiesPath: "/z/later"},
+			{Browser: "chrome", Profile: "Default", IsDefault: false, CookiesPath: "/a/earlier"},
+		}
+		sort.Slice(s, func(i, j int) bool {
+			if s[i].IsDefault != s[j].IsDefault {
+				return s[i].IsDefault
+			}
+			if s[i].Profile != s[j].Profile {
+				return s[i].Profile < s[j].Profile
+			}
+			return s[i].CookiesPath < s[j].CookiesPath
+		})
+		if s[0].CookiesPath != "/a/earlier" {
+			t.Fatalf("run %d: expected /a/earlier first, got %s", run, s[0].CookiesPath)
+		}
+	}
+}

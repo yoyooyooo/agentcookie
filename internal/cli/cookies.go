@@ -153,12 +153,17 @@ func collectDomainCookiesFromChrome(domain string, matcher *protocol.BlocklistMa
 	for _, browserName := range browserNames {
 		stores := browserStores[browserName]
 
-		// Sort stores: Default first, then alphabetically by profile name.
+		// Sort stores: Default first, then alphabetically by profile name,
+		// then by CookiesPath as tiebreaker for same-named profiles from
+		// different roots (ensures stable first-wins deduplication).
 		sort.Slice(stores, func(i, j int) bool {
 			if stores[i].IsDefault != stores[j].IsDefault {
 				return stores[i].IsDefault
 			}
-			return stores[i].Profile < stores[j].Profile
+			if stores[i].Profile != stores[j].Profile {
+				return stores[i].Profile < stores[j].Profile
+			}
+			return stores[i].CookiesPath < stores[j].CookiesPath
 		})
 
 		key, err := getChromeDecryptKey(browserName)
