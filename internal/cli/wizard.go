@@ -213,17 +213,23 @@ func wizardInstallSource(ctx context.Context, binPath, logDir string) error {
 		fmt.Fprintf(os.Stderr, "agentcookie wizard: paired with %q (code was %s)\n", wizardPeer, code)
 	}
 
-	// Step 4: install the LaunchAgent unless skipped.
+	// Step 4: install the daemon unless skipped.
 	if !wizardSkipDaemon {
-		if err := installLaunchAgent(launchd.Spec{
-			Role:       launchd.RoleSource,
-			BinaryPath: binPath,
-			LogDir:     logDir,
-			ExtraArgs:  []string{"--watch"},
-		}); err != nil {
-			return fmt.Errorf("install source LaunchAgent: %w", err)
+		if config.IsLinux() {
+			// Linux: no LaunchAgents. Print systemd user unit or supervisor
+			// instructions so the operator can install the daemon themselves.
+			printLinuxDaemonInstructions("source", binPath, logDir, []string{"--watch"})
+		} else {
+			if err := installLaunchAgent(launchd.Spec{
+				Role:       launchd.RoleSource,
+				BinaryPath: binPath,
+				LogDir:     logDir,
+				ExtraArgs:  []string{"--watch"},
+			}); err != nil {
+				return fmt.Errorf("install source LaunchAgent: %w", err)
+			}
+			fmt.Fprintln(os.Stderr, "agentcookie wizard: source LaunchAgent installed and started")
 		}
-		fmt.Fprintln(os.Stderr, "agentcookie wizard: source LaunchAgent installed and started")
 	}
 
 	if !wizardSkipExitNode {
@@ -341,14 +347,20 @@ func wizardInstallSink(ctx context.Context, binPath, logDir string) error {
 	_ = keychainOpened
 
 	if !wizardSkipDaemon {
-		if err := installLaunchAgent(launchd.Spec{
-			Role:       launchd.RoleSink,
-			BinaryPath: binPath,
-			LogDir:     logDir,
-		}); err != nil {
-			return fmt.Errorf("install sink LaunchAgent: %w", err)
+		if config.IsLinux() {
+			// Linux: no LaunchAgents. Print systemd user unit or supervisor
+			// instructions so the operator can install the daemon themselves.
+			printLinuxDaemonInstructions("sink", binPath, logDir, nil)
+		} else {
+			if err := installLaunchAgent(launchd.Spec{
+				Role:       launchd.RoleSink,
+				BinaryPath: binPath,
+				LogDir:     logDir,
+			}); err != nil {
+				return fmt.Errorf("install sink LaunchAgent: %w", err)
+			}
+			fmt.Fprintln(os.Stderr, "agentcookie wizard: sink LaunchAgent installed and started")
 		}
-		fmt.Fprintln(os.Stderr, "agentcookie wizard: sink LaunchAgent installed and started")
 	}
 
 	if !wizardSkipExitNode {
@@ -980,4 +992,52 @@ func errIsAlreadyLoaded(err error) bool {
 	// We do not enumerate them here; the kickstart attempt is safe regardless.
 	_ = time.Second // placeholder reference to avoid import-cleanup issues
 	return false
+}
+
+// printLinuxDaemonInstructions prints systemd user unit instructions for Linux.
+// LaunchAgents are macOS-only; on Linux the operator must install the daemon
+// themselves. This function prints exact instructions including a systemd user
+// unit file the operator can copy, or supervisor/manual run commands.
+func printLinuxDaemonInstructions(role, binPath, logDir string, extraArgs []string) {
+	home, _ := os.UserHomeDir()
+	unitName := "agentcookie-" + role + ".service"
+	unitPath := filepath.Join(home, ".config", "systemd", "user", unitName)
+
+	// Build the command line from the actual binary path (os.Executable()).
+	cmdArgs := []string{binPath, role}
+	cmdArgs = append(cmdArgs, extraArgs...)
+	execStart := strings.Join(cmdArgs, " ")
+
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "agentcookie wizard: Linux detected; LaunchAgents are macOS-only.")
+	fmt.Fprintln(os.Stderr, "agentcookie wizard: To run the daemon, use one of these methods:")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  1. SYSTEMD USER UNIT (recommended for persistent operation):")
+	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", filepath.Dir(unitPath))
+	fmt.Fprintf(os.Stderr, "     cat > %s << 'EOF'\n", unitPath)
+	fmt.Fprintln(os.Stderr, "[Unit]")
+	fmt.Fprintf(os.Stderr, "Description=agentcookie %s daemon\n", role)
+	fmt.Fprintln(os.Stderr, "After=network.target")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "[Service]")
+	fmt.Fprintf(os.Stderr, "ExecStart=%s\n", execStart)
+	fmt.Fprintln(os.Stderr, "Restart=on-failure")
+	fmt.Fprintln(os.Stderr, "RestartSec=10")
+	fmt.Fprintf(os.Stderr, "StandardOutput=append:%s/%s.out.log\n", logDir, role)
+	fmt.Fprintf(os.Stderr, "StandardError=append:%s/%s.err.log\n", logDir, role)
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "[Install]")
+	fmt.Fprintln(os.Stderr, "WantedBy=default.target")
+	fmt.Fprintln(os.Stderr, "EOF")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "     Then run:")
+	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", logDir)
+	fmt.Fprintln(os.Stderr, "     systemctl --user daemon-reload")
+	fmt.Fprintf(os.Stderr, "     systemctl --user enable --now %s\n", unitName)
+	fmt.Fprintf(os.Stderr, "     systemctl --user status %s\n", unitName)
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  2. SUPERVISOR / MANUAL RUN:")
+	fmt.Fprintf(os.Stderr, "     %s\n", execStart)
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "agentcookie wizard: %s config written; daemon must be started manually on Linux\n", role)
 }

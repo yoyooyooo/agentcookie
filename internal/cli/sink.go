@@ -319,16 +319,37 @@ func newSinkMux(
 		// no Keychain, no Chrome SQLite rewrite, just live CDP injection
 		// into a Chrome that the agent runtime (e.g., Grok Bot) already
 		// started with --remote-debugging-port.
+		var liveCDPContexts int
+		var liveCDPErr error
 		if cfg.LiveCDP.Enabled && len(cookies) > 0 {
 			endpoint := cfg.LiveCDP.Endpoint
 			if endpoint == "" {
 				endpoint = livecdp.DefaultCDPEndpoint
 			}
-			if n, lcdpErr := livecdp.AttachAndInject(r.Context(), endpoint, cookies); lcdpErr != nil {
-				fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP injection failed (sidecar write succeeded): %v\n", lcdpErr)
+			liveCDPContexts, liveCDPErr = livecdp.AttachAndInject(r.Context(), endpoint, cookies)
+			if liveCDPErr != nil {
+				fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP injection failed (sidecar write succeeded): %v\n", liveCDPErr)
 			} else {
-				fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP injection pushed %d cookies into %d context(s) at %s\n", len(cookies), n, endpoint)
+				fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP injection pushed %d cookies into %d context(s) at %s\n", len(cookies), liveCDPContexts, endpoint)
 				sinkState.LastWriteMode = writeMode + "+livecdp"
+			}
+
+			// Track live CDP state for status/doctor visibility.
+			if sinkState.LiveCDP == nil {
+				sinkState.LiveCDP = &state.LiveCDPState{
+					Enabled:  true,
+					Endpoint: endpoint,
+				}
+			}
+			sinkState.LiveCDP.LastInjectAt = time.Now().UTC()
+			sinkState.LiveCDP.LastCookies = len(cookies)
+			sinkState.LiveCDP.LastContexts = liveCDPContexts
+			if liveCDPErr != nil {
+				sinkState.LiveCDP.LastError = liveCDPErr.Error()
+				sinkState.LiveCDP.TotalFailures++
+			} else {
+				sinkState.LiveCDP.LastError = ""
+				sinkState.LiveCDP.TotalInjects++
 			}
 		}
 
@@ -362,7 +383,27 @@ func newSinkMux(
 		}
 
 		_ = stateWriter.Save(sinkState)
-		_, _ = fmt.Fprintf(w, "ok: wrote %d cookies (%d sidecar), %d localStorage origins, %d indexedDB origins; dropped %d %s cookies\n", result.Cookies, result.SidecarCookies, result.LocalStorage, result.IndexedDB, dropped, blockMatcher.DropLabel())
+
+		// Build the ok-line. When live CDP ran, include inject result so
+		// operators don't mistake "wrote 0 cookies" for a failure (Linux
+		// skips SQLite and injects via live CDP; the sidecar+livecdp path
+		// is the real delivery).
+		okLine := fmt.Sprintf("ok: wrote %d cookies (%d sidecar), %d localStorage origins, %d indexedDB origins; dropped %d %s cookies",
+			result.Cookies, result.SidecarCookies, result.LocalStorage, result.IndexedDB, dropped, blockMatcher.DropLabel())
+		if cfg.LiveCDP.Enabled {
+			endpoint := cfg.LiveCDP.Endpoint
+			if endpoint == "" {
+				endpoint = livecdp.DefaultCDPEndpoint
+			}
+			if liveCDPErr != nil {
+				okLine += fmt.Sprintf("; live_cdp: FAILED at %s: %v", endpoint, liveCDPErr)
+			} else if liveCDPContexts > 0 {
+				okLine += fmt.Sprintf("; live_cdp: injected %d cookies into %d context(s) at %s", len(cookies), liveCDPContexts, endpoint)
+			} else if len(cookies) == 0 {
+				okLine += fmt.Sprintf("; live_cdp: no cookies to inject (endpoint=%s)", endpoint)
+			}
+		}
+		_, _ = fmt.Fprintln(w, okLine)
 	})
 	return mux
 }
