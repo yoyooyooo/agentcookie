@@ -97,3 +97,68 @@ emits; the alias above is the operator-set bridge until then.
 
 Per-app push adapters (`internal/sinkpush`) remain as a legacy fallback; the
 read commands above are the supported, generic consumption path.
+
+## Linux consumption (v0.14+)
+
+On Linux, agentcookie does not write Chrome's SQLite or the plaintext sidecar.
+Instead, it injects cookies directly into a running Chrome via CDP. The
+consumption path for Linux agent runtimes is:
+
+1. **Start Chrome with CDP enabled**:
+   ```bash
+   google-chrome --remote-debugging-port=9223 &
+   ```
+
+2. **Import cookies from the source Mac**:
+   ```bash
+   # Transfer the export JSON (must be mode 0600)
+   agentcookie import -f /tmp/cookies.json
+   ```
+
+3. **Cookies are live immediately**. Any page Chrome loads (including agent-
+   driven pages via Playwright, Puppeteer, or browser-use) sees the logged-in
+   session.
+
+### Linux cookie policy
+
+Missing `blocklist.yaml` or an omitted `policy` field defaults to **allowlist-
+empty** on Linux (ship nothing). This is security-by-default: an untrusted
+Linux sink must explicitly opt domains into sync.
+
+Configure which domains sync:
+
+```yaml
+# ~/.config/agentcookie/blocklist.yaml
+version: 1
+policy: allowlist
+domains:
+  - pattern: "github.com"
+  - pattern: "%.github.com"
+  - pattern: "%.openai.com"
+```
+
+### Workflow example: Grok Bot
+
+```bash
+# On Mac (source): export cookies matching your allowlist
+agentcookie export > cookies.json
+chmod 600 cookies.json
+scp cookies.json grok-bot:/tmp/
+
+# On Linux (Grok Bot): start Chrome + import
+google-chrome --remote-debugging-port=9223 --headless=new &
+agentcookie import -f /tmp/cookies.json
+
+# Grok Bot's browser now has your logged-in sessions
+```
+
+### What's NOT available on Linux
+
+- Plaintext sidecar (`~/.agentcookie/cookies-plain.db`) — not written
+- Per-CLI push adapters — not triggered (no sidecar to read)
+- Continuous `/sync` over Tailscale — use the one-shot import path
+- `agentcookie cookies --domain` — reads the sidecar, which doesn't exist
+
+For continuous sync on Linux, wrap the export + import flow in a cron job or
+watch loop on the source side, or use the macOS sink if you need the full
+feature set.

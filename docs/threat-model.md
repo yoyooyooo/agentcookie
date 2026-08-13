@@ -56,7 +56,23 @@ agentcookie trusts:
 
 - v0.12 (this release) closes every Critical and High finding from the v0.11 threat survey except S5 (plaintext sidecar at rest), which stays open in the default install because turning sealing on requires the PP CLI consumer-side (U12) to ship in cli-printing-press first. Operators who only run agentcookie-controlled binaries on the sink can pass `wizard set-keychain-access --enable-sealing` to opt in; the on-disk sidecar and adapter session files become sealed and S5 closes for them.
 - v0.13 (planned) will migrate the paired key keystore at `~/.config/agentcookie/keys/<peer>.json` into the macOS Keychain, closing the last on-disk plaintext credential.
-- v0.14 or later may add Linux sink support, a Chrome extension on the sink, and one-to-many fan-out. Each of those reopens parts of this document; re-read before adopting.
+- v0.14 adds Linux sink support via `agentcookie import` with live CDP injection. Key security differences on Linux:
+  - **No Keychain**: Linux has no macOS Keychain; the import path never touches Chrome's encryption layer.
+  - **Allowlist-empty default**: Missing `blocklist.yaml` or missing `policy` field defaults to an empty allowlist (ship nothing) on Linux, not the macOS blocklist default (sync-all). This is security-by-default for untrusted sinks.
+  - **File permissions**: The import command refuses world-readable input files (`chmod 600` required).
+  - **CDP-only injection**: Cookies go straight into Chrome's in-memory store via CDP; there's no on-disk Chrome SQLite write on Linux.
+  - **Threat surface**: Same-user processes can connect to Chrome's CDP port while it's open. Treat a Linux agent runtime as a same-user trust boundary.
+
+## Linux sink specifics
+
+The Linux receive path (v0.14+) operates under a stricter trust model than the macOS sink:
+
+- **Source stays macOS**: Linux never decrypts Chrome Safe Storage or reads the macOS Keychain. Cookie values arrive already decrypted in the export JSON (which must be mode 0600).
+- **No Chrome SQLite rewrite**: agentcookie does not call libsecret or write Chrome's Cookies file on Linux. All injection is live CDP.
+- **Cookie policy**: Missing policy defaults to allowlist-empty. The operator must explicitly opt domains into sync via `blocklist.yaml` with `policy: allowlist`.
+- **CDP surface**: The import path attaches to an already-running Chrome's CDP endpoint (default `http://127.0.0.1:9223`). Chrome must have been started with `--remote-debugging-port=9223`. While the endpoint is open, any same-user process can connect to it.
+- **No replay defense**: The one-shot import path has no sequence tracking; replay defense is the operator's responsibility (e.g., delete the JSON after import).
+- **Doctor/wizard**: On Linux, `agentcookie doctor` does not check Keychain, LaunchAgents, or codesign — those are macOS-specific. It checks CDP connectivity instead.
 
 ## Reporting issues
 

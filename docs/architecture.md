@@ -2,6 +2,8 @@
 
 ## The picture
 
+### macOS → macOS (continuous sync via Tailscale)
+
 ```
         SOURCE (laptop)                                  SINK (Mac mini / cloud VM)
    +---------------------------+                    +-----------------------------+
@@ -22,6 +24,26 @@
             +-----------  Tailscale tailnet  ------------------+
             |             (WireGuard, ACLs)                    |
             +--------------------------------------------------+
+```
+
+### macOS → Linux (one-shot import via file transfer)
+
+```
+        SOURCE (laptop)                                  SINK (Linux / Grok Bot)
+   +---------------------------+                    +-----------------------------+
+   |  Chrome stable            |                    |  Chrome (--remote-debugging |
+   |    Cookies SQLite         |                    |           -port=9223)       |
+   |    Safe Storage (Keychain)|                    |                             |
+   |                           |                    |  agentcookie import         |
+   |  agentcookie export       |                    |    - read JSON (mode 0600)  |
+   |    - read SQLite (RO)     |   cookies.json     |    - filter by allowlist    |
+   |    - decrypt w/ local key |  (scp, file drop,  |    - CDP attach to Chrome   |
+   |    - filter by blocklist  |   or stdin pipe)   |    - Storage.setCookies per |
+   |    - output JSON          | ================>  |      browser context        |
+   +---------------------------+                    +-----------------------------+
+
+No Keychain, no Chrome SQLite rewrite, no libsecret. Just live CDP injection.
+Security: missing policy = allowlist-empty (ship nothing) on Linux.
 ```
 
 ## Module layout
