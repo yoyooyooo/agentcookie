@@ -752,9 +752,9 @@ peer:
 	// adapters added the Source adapter check. The cmux delivery surface added
 	// the cmux delivery check. Browser-bound-session honesty added the cmux
 	// session health check (source role only; present here since this fixture
-	// is source).
-	if got := len(report.Checks); got != 20 {
-		t.Fatalf("got %d checks, want 20", got)
+	// is source). Chrome extra profile discovery added the Chrome stores check.
+	if got := len(report.Checks); got != 21 {
+		t.Fatalf("got %d checks, want 21", got)
 	}
 
 	// Serialize the envelope and confirm it round-trips.
