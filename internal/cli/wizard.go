@@ -994,6 +994,46 @@ func errIsAlreadyLoaded(err error) bool {
 	return false
 }
 
+// systemdQuote returns a path quoted for use in systemd unit files.
+// Systemd uses C-style escaping: backslash-escape special characters and
+// wrap in double quotes if the path contains whitespace or systemd specifiers.
+func systemdQuote(path string) string {
+	needsQuotes := false
+	for _, c := range path {
+		if c == ' ' || c == '\t' || c == '%' || c == '"' || c == '\\' {
+			needsQuotes = true
+			break
+		}
+	}
+	if !needsQuotes {
+		return path
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, c := range path {
+		switch c {
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteRune(c)
+		case '%':
+			b.WriteString("%%")
+		default:
+			b.WriteRune(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// shellQuote returns a path quoted for use in shell commands.
+// Uses single quotes which prevent all expansion except for embedded single quotes.
+func shellQuote(path string) string {
+	if !strings.ContainsAny(path, " \t'\"\\$`!") {
+		return path
+	}
+	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+}
+
 // printLinuxDaemonInstructions prints systemd user unit instructions for Linux.
 // LaunchAgents are macOS-only; on Linux the operator must install the daemon
 // themselves. This function prints exact instructions including a systemd user
@@ -1004,17 +1044,32 @@ func printLinuxDaemonInstructions(role, binPath, logDir string, extraArgs []stri
 	unitPath := filepath.Join(home, ".config", "systemd", "user", unitName)
 
 	// Build the command line from the actual binary path (os.Executable()).
-	cmdArgs := []string{binPath, role}
-	cmdArgs = append(cmdArgs, extraArgs...)
-	execStart := strings.Join(cmdArgs, " ")
+	// Quote each argument for systemd's ExecStart parsing.
+	quotedArgs := make([]string, 0, len(extraArgs)+2)
+	quotedArgs = append(quotedArgs, systemdQuote(binPath), role)
+	for _, arg := range extraArgs {
+		quotedArgs = append(quotedArgs, systemdQuote(arg))
+	}
+	execStart := strings.Join(quotedArgs, " ")
+
+	// Build shell-quoted manual run command.
+	shellArgs := make([]string, 0, len(extraArgs)+2)
+	shellArgs = append(shellArgs, shellQuote(binPath), role)
+	for _, arg := range extraArgs {
+		shellArgs = append(shellArgs, shellQuote(arg))
+	}
+	manualRun := strings.Join(shellArgs, " ")
+
+	outLog := filepath.Join(logDir, role+".out.log")
+	errLog := filepath.Join(logDir, role+".err.log")
 
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "agentcookie wizard: Linux detected; LaunchAgents are macOS-only.")
 	fmt.Fprintln(os.Stderr, "agentcookie wizard: To run the daemon, use one of these methods:")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "  1. SYSTEMD USER UNIT (recommended for persistent operation):")
-	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", filepath.Dir(unitPath))
-	fmt.Fprintf(os.Stderr, "     cat > %s << 'EOF'\n", unitPath)
+	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", shellQuote(filepath.Dir(unitPath)))
+	fmt.Fprintf(os.Stderr, "     cat > %s << 'EOF'\n", shellQuote(unitPath))
 	fmt.Fprintln(os.Stderr, "[Unit]")
 	fmt.Fprintf(os.Stderr, "Description=agentcookie %s daemon\n", role)
 	fmt.Fprintln(os.Stderr, "After=network.target")
@@ -1023,21 +1078,21 @@ func printLinuxDaemonInstructions(role, binPath, logDir string, extraArgs []stri
 	fmt.Fprintf(os.Stderr, "ExecStart=%s\n", execStart)
 	fmt.Fprintln(os.Stderr, "Restart=on-failure")
 	fmt.Fprintln(os.Stderr, "RestartSec=10")
-	fmt.Fprintf(os.Stderr, "StandardOutput=append:%s/%s.out.log\n", logDir, role)
-	fmt.Fprintf(os.Stderr, "StandardError=append:%s/%s.err.log\n", logDir, role)
+	fmt.Fprintf(os.Stderr, "StandardOutput=append:%s\n", systemdQuote(outLog))
+	fmt.Fprintf(os.Stderr, "StandardError=append:%s\n", systemdQuote(errLog))
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "[Install]")
 	fmt.Fprintln(os.Stderr, "WantedBy=default.target")
 	fmt.Fprintln(os.Stderr, "EOF")
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "     Then run:")
-	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", logDir)
+	fmt.Fprintf(os.Stderr, "     mkdir -p %s\n", shellQuote(logDir))
 	fmt.Fprintln(os.Stderr, "     systemctl --user daemon-reload")
 	fmt.Fprintf(os.Stderr, "     systemctl --user enable --now %s\n", unitName)
 	fmt.Fprintf(os.Stderr, "     systemctl --user status %s\n", unitName)
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "  2. SUPERVISOR / MANUAL RUN:")
-	fmt.Fprintf(os.Stderr, "     %s\n", execStart)
+	fmt.Fprintf(os.Stderr, "     %s\n", manualRun)
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintf(os.Stderr, "agentcookie wizard: %s config written; daemon must be started manually on Linux\n", role)
 }

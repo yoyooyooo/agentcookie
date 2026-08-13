@@ -63,14 +63,14 @@ type SinkState struct {
 // LiveCDPState records the outcome of live CDP injection into an
 // already-running Chrome. This is the Linux sink's primary injection path.
 type LiveCDPState struct {
-	Enabled        bool      `json:"enabled"`
-	Endpoint       string    `json:"endpoint"`
-	LastInjectAt   time.Time `json:"last_inject_at,omitempty"`
-	LastContexts   int       `json:"last_contexts,omitempty"`
-	LastCookies    int       `json:"last_cookies,omitempty"`
-	LastError      string    `json:"last_error,omitempty"`
-	TotalInjects   int       `json:"total_injects"`
-	TotalFailures  int       `json:"total_failures"`
+	Enabled       bool      `json:"enabled"`
+	Endpoint      string    `json:"endpoint"`
+	LastInjectAt  time.Time `json:"last_inject_at,omitempty"`
+	LastContexts  int       `json:"last_contexts,omitempty"`
+	LastCookies   int       `json:"last_cookies,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	TotalInjects  int       `json:"total_injects"`
+	TotalFailures int       `json:"total_failures"`
 }
 
 // AdapterResult is the per-adapter outcome of the most recent sinkpush

@@ -525,21 +525,18 @@ func extractLaunchAgentBinaryPath(spec launchd.Spec) string {
 	}
 	// Simple extraction: find the first <string> after ProgramArguments.
 	// This is a pragmatic approach that avoids importing plist libraries.
-	idx := strings.Index(string(data), "<key>ProgramArguments</key>")
-	if idx == -1 {
+	_, afterKey, found := strings.Cut(string(data), "<key>ProgramArguments</key>")
+	if !found {
 		return ""
 	}
-	rest := string(data)[idx:]
-	start := strings.Index(rest, "<string>")
-	if start == -1 {
+	_, afterOpen, found := strings.Cut(afterKey, "<string>")
+	if !found {
 		return ""
 	}
-	rest = rest[start+8:]
-	end := strings.Index(rest, "</string>")
-	if end == -1 {
+	binPath, _, found := strings.Cut(afterOpen, "</string>")
+	if !found {
 		return ""
 	}
-	binPath := rest[:end]
 	// Resolve symlinks for comparison.
 	if resolved, err := filepath.EvalSymlinks(binPath); err == nil {
 		return resolved
