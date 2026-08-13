@@ -91,7 +91,8 @@ func chromeRoots() []string {
 
 	var roots []string
 
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		appSupport := filepath.Join(home, "Library", "Application Support")
 		roots = append(roots,
 			filepath.Join(appSupport, "Google", "Chrome"),
@@ -99,7 +100,7 @@ func chromeRoots() []string {
 			filepath.Join(appSupport, "BraveSoftware", "Brave-Browser"),
 			filepath.Join(appSupport, "Microsoft Edge"),
 		)
-	} else if runtime.GOOS == "linux" {
+	case "linux":
 		configDir := filepath.Join(home, ".config")
 		roots = append(roots,
 			filepath.Join(configDir, "google-chrome"),

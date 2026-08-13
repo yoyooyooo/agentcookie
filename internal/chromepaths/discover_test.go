@@ -384,17 +384,17 @@ func TestProfileNameAllowlist(t *testing.T) {
 		{"Profile 123", true},
 		{"Guest Profile", true},
 		{"System Profile", true},
-		{"Profile", false},       // Missing number
-		{"Profile1", false},      // No space
-		{"Profile X", false},     // Non-numeric
-		{"Crashpad", false},      // Cache dir
-		{"random-dir", false},    // Random
-		{"Default ", false},      // Trailing space
-		{" Default", false},      // Leading space
-		{"Default123", false},    // Invalid
-		{"MyProfile 1", false},   // Invalid prefix
-		{"Guest", false},         // Incomplete
-		{"System", false},        // Incomplete
+		{"Profile", false},        // Missing number
+		{"Profile1", false},       // No space
+		{"Profile X", false},      // Non-numeric
+		{"Crashpad", false},       // Cache dir
+		{"random-dir", false},     // Random
+		{"Default ", false},       // Trailing space
+		{" Default", false},       // Leading space
+		{"Default123", false},     // Invalid
+		{"MyProfile 1", false},    // Invalid prefix
+		{"Guest", false},          // Incomplete
+		{"System", false},         // Incomplete
 		{"Guest Profile ", false}, // Trailing space
 	}
 
