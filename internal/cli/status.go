@@ -73,8 +73,12 @@ var statusCmd = &cobra.Command{
 			st.SinkState = sk
 		}
 
-		// Discover Chrome stores.
-		discovery := chromepaths.Discover()
+		// Discover Chrome stores. Include config's CDP.ProfileDir if set.
+		cdpProfileDir := ""
+		if st.SinkConfig != nil {
+			cdpProfileDir = st.SinkConfig.CDP.ProfileDir
+		}
+		discovery := chromepaths.DiscoverForConfig(cdpProfileDir)
 		if len(discovery.Stores) > 0 || len(discovery.Skipped) > 0 {
 			stores := make([]ChromeStoreInfo, 0, len(discovery.Stores))
 			for _, s := range discovery.Stores {

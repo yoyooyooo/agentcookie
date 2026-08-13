@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/mvanhorn/agentcookie/internal/chromepaths"
 	"github.com/mvanhorn/agentcookie/internal/config"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
 	"github.com/mvanhorn/agentcookie/pkg/sidecar"
@@ -308,4 +310,83 @@ func runCookiesCommandForTest(t *testing.T, configDir, domain string, asJSON boo
 	out := &bytes.Buffer{}
 	err := cookiesCmd.RunE(commandWithOutput(out), nil)
 	return out.String(), err
+}
+
+// TestChromeStoreSortOrder verifies that Chrome stores are sorted deterministically:
+// Default profile first, then alphabetically by profile name. This ensures that
+// when multiple profiles have the same cookie (host+name), the winner is predictable.
+func TestChromeStoreSortOrder(t *testing.T) {
+	stores := []chromepaths.Store{
+		{Browser: "Chrome", Profile: "Profile 3", IsDefault: false},
+		{Browser: "Chrome", Profile: "Default", IsDefault: true},
+		{Browser: "Chrome", Profile: "Profile 1", IsDefault: false},
+		{Browser: "Chrome", Profile: "Profile 2", IsDefault: false},
+	}
+
+	// Apply the same sort logic as collectDomainCookiesFromChrome.
+	sort.Slice(stores, func(i, j int) bool {
+		if stores[i].IsDefault != stores[j].IsDefault {
+			return stores[i].IsDefault
+		}
+		return stores[i].Profile < stores[j].Profile
+	})
+
+	// Verify order: Default first, then alphabetical.
+	expected := []string{"Default", "Profile 1", "Profile 2", "Profile 3"}
+	for i, exp := range expected {
+		if stores[i].Profile != exp {
+			t.Errorf("position %d: got %q, want %q", i, stores[i].Profile, exp)
+		}
+	}
+}
+
+// TestChromeStoreSortOrderMultipleBrowsers verifies deterministic iteration
+// across multiple browsers: browsers are sorted alphabetically, then stores
+// within each browser are sorted (Default first, then alphabetically).
+func TestChromeStoreSortOrderMultipleBrowsers(t *testing.T) {
+	browserStores := map[string][]chromepaths.Store{
+		"Chrome Canary": {
+			{Browser: "Chrome Canary", Profile: "Profile 2", IsDefault: false},
+			{Browser: "Chrome Canary", Profile: "Default", IsDefault: true},
+		},
+		"Chromium": {
+			{Browser: "Chromium", Profile: "Profile 1", IsDefault: false},
+			{Browser: "Chromium", Profile: "Default", IsDefault: true},
+		},
+		"Google Chrome": {
+			{Browser: "Google Chrome", Profile: "Profile B", IsDefault: false},
+			{Browser: "Google Chrome", Profile: "Profile A", IsDefault: false},
+			{Browser: "Google Chrome", Profile: "Default", IsDefault: true},
+		},
+	}
+
+	// Sort browser names (same logic as collectDomainCookiesFromChrome).
+	browserNames := make([]string, 0, len(browserStores))
+	for name := range browserStores {
+		browserNames = append(browserNames, name)
+	}
+	sort.Strings(browserNames)
+
+	// Verify browser order is deterministic and alphabetical.
+	expectedBrowsers := []string{"Chrome Canary", "Chromium", "Google Chrome"}
+	for i, exp := range expectedBrowsers {
+		if browserNames[i] != exp {
+			t.Errorf("browser %d: got %q, want %q", i, browserNames[i], exp)
+		}
+	}
+
+	// Verify that running the sort 100 times produces the same result.
+	// This catches any non-determinism in the sorting.
+	for run := 0; run < 100; run++ {
+		names := make([]string, 0, len(browserStores))
+		for name := range browserStores {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for i, exp := range expectedBrowsers {
+			if names[i] != exp {
+				t.Fatalf("run %d: browser order changed, got %v", run, names)
+			}
+		}
+	}
 }

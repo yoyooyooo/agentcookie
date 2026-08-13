@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mvanhorn/agentcookie/internal/chrome"
 	"github.com/mvanhorn/agentcookie/internal/chromepaths"
+	"github.com/mvanhorn/agentcookie/internal/config"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
 	"github.com/mvanhorn/agentcookie/pkg/sidecar"
 )
@@ -78,8 +80,13 @@ func collectDomainCookiesUnion(sidecarPath, domain string, matcher *protocol.Blo
 	}
 
 	// On Darwin, also read from discovered Chrome profiles.
+	// Include config's CDP.ProfileDir if set.
 	if runtime.GOOS == "darwin" {
-		chromeCookies := collectDomainCookiesFromChrome(domain, matcher, seen)
+		profileDir := ""
+		if sinkCfg, err := config.LoadSink(common.ConfigDir); err == nil && sinkCfg != nil {
+			profileDir = sinkCfg.CDP.ProfileDir
+		}
+		chromeCookies := collectDomainCookiesFromChrome(domain, matcher, seen, profileDir)
 		sidecarCookies = append(sidecarCookies, chromeCookies...)
 	}
 
@@ -120,12 +127,15 @@ func collectDomainCookiesFromSidecar(path, domain string, matcher *protocol.Bloc
 // collectDomainCookiesFromChrome reads cookies from discovered Chrome profiles.
 // It skips stores that fail to decrypt (e.g., wrong key, locked DB) and only
 // returns cookies not already in the seen set (deduplication with sidecar).
-func collectDomainCookiesFromChrome(domain string, matcher *protocol.BlocklistMatcher, seen map[string]bool) []sidecar.Cookie {
+// profileDir is passed to DiscoverForConfig to include a configured CDP profile.
+// Stores are processed in stable order: browsers sorted alphabetically, then
+// stores sorted with Default profile first followed by alphabetical profile names.
+func collectDomainCookiesFromChrome(domain string, matcher *protocol.BlocklistMatcher, seen map[string]bool, profileDir string) []sidecar.Cookie {
 	var result []sidecar.Cookie
 	bare := strings.TrimPrefix(domain, ".")
 	hostPattern := "%" + bare
 
-	discovery := chromepaths.Discover()
+	discovery := chromepaths.DiscoverForConfig(profileDir)
 
 	// Group stores by browser to reuse decryption keys.
 	browserStores := make(map[string][]chromepaths.Store)
@@ -133,7 +143,24 @@ func collectDomainCookiesFromChrome(domain string, matcher *protocol.BlocklistMa
 		browserStores[store.Browser] = append(browserStores[store.Browser], store)
 	}
 
-	for browserName, stores := range browserStores {
+	// Sort browser names for deterministic iteration order.
+	browserNames := make([]string, 0, len(browserStores))
+	for name := range browserStores {
+		browserNames = append(browserNames, name)
+	}
+	sort.Strings(browserNames)
+
+	for _, browserName := range browserNames {
+		stores := browserStores[browserName]
+
+		// Sort stores: Default first, then alphabetically by profile name.
+		sort.Slice(stores, func(i, j int) bool {
+			if stores[i].IsDefault != stores[j].IsDefault {
+				return stores[i].IsDefault
+			}
+			return stores[i].Profile < stores[j].Profile
+		})
+
 		key, err := getChromeDecryptKey(browserName)
 		if err != nil {
 			// Can't decrypt this browser's cookies - skip all its stores.
@@ -157,11 +184,11 @@ func collectDomainCookiesFromChrome(domain string, matcher *protocol.BlocklistMa
 				if matcher != nil && !matcher.ShouldSyncHost(c.HostKey) {
 					continue
 				}
-				key := c.HostKey + "\x00" + c.Name
-				if seen[key] {
+				cookieKey := c.HostKey + "\x00" + c.Name
+				if seen[cookieKey] {
 					continue
 				}
-				seen[key] = true
+				seen[cookieKey] = true
 				result = append(result, sidecar.Cookie{
 					HostKey:    c.HostKey,
 					Name:       c.Name,
