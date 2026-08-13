@@ -994,9 +994,9 @@ func errIsAlreadyLoaded(err error) bool {
 	return false
 }
 
-// systemdQuote returns a path quoted for use in systemd unit files.
-// Systemd uses C-style escaping: backslash-escape special characters and
-// wrap in double quotes if the path contains whitespace or systemd specifiers.
+// systemdQuote returns an argument quoted for use in systemd ExecStart and
+// similar command-line directives. Systemd uses C-style escaping and wraps
+// in double quotes if the argument contains whitespace or systemd specifiers.
 func systemdQuote(path string) string {
 	needsQuotes := false
 	for _, c := range path {
@@ -1022,6 +1022,32 @@ func systemdQuote(path string) string {
 		}
 	}
 	b.WriteByte('"')
+	return b.String()
+}
+
+// systemdEscapePath returns a path escaped for use in systemd file-path
+// directives like StandardOutput=append: and StandardError=append:.
+// These directives do NOT support quote-wrapped paths after the prefix;
+// instead, special characters must be C-style escaped directly.
+// See systemd.exec(5) for details.
+func systemdEscapePath(path string) string {
+	var b strings.Builder
+	for _, c := range path {
+		switch c {
+		case ' ':
+			b.WriteString("\\x20")
+		case '\t':
+			b.WriteString("\\x09")
+		case '\n':
+			b.WriteString("\\x0a")
+		case '\\':
+			b.WriteString("\\\\")
+		case '%':
+			b.WriteString("%%")
+		default:
+			b.WriteRune(c)
+		}
+	}
 	return b.String()
 }
 
@@ -1078,8 +1104,8 @@ func printLinuxDaemonInstructions(role, binPath, logDir string, extraArgs []stri
 	fmt.Fprintf(os.Stderr, "ExecStart=%s\n", execStart)
 	fmt.Fprintln(os.Stderr, "Restart=on-failure")
 	fmt.Fprintln(os.Stderr, "RestartSec=10")
-	fmt.Fprintf(os.Stderr, "StandardOutput=append:%s\n", systemdQuote(outLog))
-	fmt.Fprintf(os.Stderr, "StandardError=append:%s\n", systemdQuote(errLog))
+	fmt.Fprintf(os.Stderr, "StandardOutput=append:%s\n", systemdEscapePath(outLog))
+	fmt.Fprintf(os.Stderr, "StandardError=append:%s\n", systemdEscapePath(errLog))
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "[Install]")
 	fmt.Fprintln(os.Stderr, "WantedBy=default.target")
