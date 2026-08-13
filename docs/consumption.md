@@ -100,24 +100,39 @@ read commands above are the supported, generic consumption path.
 
 ## Linux consumption (v0.14+)
 
-On Linux, agentcookie does not write Chrome's SQLite or the plaintext sidecar.
-Instead, it injects cookies directly into a running Chrome via CDP. The
-consumption path for Linux agent runtimes is:
+On Linux, agentcookie runs as a continuous `/sync` sink over Tailscale, just
+like macOS. The key difference: it injects cookies directly into a running
+Chrome via CDP instead of writing Chrome's SQLite.
 
-1. **Start Chrome with CDP enabled**:
+### Setup
+
+1. **Join the tailnet**: The Linux sink MUST have a Tailscale 100.x address.
+   Verify with `tailscale status`. The sink will refuse to start without it.
+
+2. **Pair with the source Mac**:
+   ```bash
+   # On Mac (source):
+   agentcookie pair --as source
+
+   # On Linux (sink):
+   agentcookie pair --as sink --peer <mac-hostname> \
+     --pair-url http://<mac-hostname>:9998/pair --code <code>
+   ```
+
+3. **Start Chrome with CDP enabled**:
    ```bash
    google-chrome --remote-debugging-port=9223 &
    ```
 
-2. **Import cookies from the source Mac**:
+4. **Start the sink** (binds to your tailnet IP):
    ```bash
-   # Transfer the export JSON (must be mode 0600)
-   agentcookie import -f /tmp/cookies.json
+   agentcookie sink
    ```
 
-3. **Cookies are live immediately**. Any page Chrome loads (including agent-
-   driven pages via Playwright, Puppeteer, or browser-use) sees the logged-in
-   session.
+5. **Cookies sync continuously**. Whenever the source Mac's Chrome cookies
+   change, they're pushed to the Linux sink and injected via CDP. Any page
+   Chrome loads (including agent-driven pages via Playwright, Puppeteer, or
+   browser-use) sees the logged-in session.
 
 ### Linux cookie policy
 
@@ -140,25 +155,24 @@ domains:
 ### Workflow example: Grok Bot
 
 ```bash
-# On Mac (source): export cookies matching your allowlist
-agentcookie export > cookies.json
-chmod 600 cookies.json
-scp cookies.json grok-bot:/tmp/
+# Grok Bot Linux VM at 100.87.49.2 on the tailnet
 
-# On Linux (Grok Bot): start Chrome + import
+# 1. Start Chrome with CDP
 google-chrome --remote-debugging-port=9223 --headless=new &
-agentcookie import -f /tmp/cookies.json
 
-# Grok Bot's browser now has your logged-in sessions
+# 2. Start the sink (binds to 100.87.49.2:9999)
+agentcookie sink
+
+# Grok Bot's browser now syncs continuously with your Mac's sessions
 ```
 
 ### What's NOT available on Linux
 
 - Plaintext sidecar (`~/.agentcookie/cookies-plain.db`) — not written
 - Per-CLI push adapters — not triggered (no sidecar to read)
-- Continuous `/sync` over Tailscale — use the one-shot import path
 - `agentcookie cookies --domain` — reads the sidecar, which doesn't exist
+- File-based import — not the supported path; use Tailscale `/sync`
 
-For continuous sync on Linux, wrap the export + import flow in a cron job or
-watch loop on the source side, or use the macOS sink if you need the full
-feature set.
+The Linux sink is designed for agent runtimes where the only consumer is a
+browser driven by the agent. For CLIs that need the sidecar or adapters, use
+a macOS sink.

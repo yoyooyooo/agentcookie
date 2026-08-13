@@ -26,7 +26,7 @@
             +--------------------------------------------------+
 ```
 
-### macOS → Linux (one-shot import via file transfer)
+### macOS → Linux (continuous sync via Tailscale)
 
 ```
         SOURCE (laptop)                                  SINK (Linux / Grok Bot)
@@ -34,15 +34,22 @@
    |  Chrome stable            |                    |  Chrome (--remote-debugging |
    |    Cookies SQLite         |                    |           -port=9223)       |
    |    Safe Storage (Keychain)|                    |                             |
-   |                           |                    |  agentcookie import         |
-   |  agentcookie export       |                    |    - read JSON (mode 0600)  |
-   |    - read SQLite (RO)     |   cookies.json     |    - filter by allowlist    |
-   |    - decrypt w/ local key |  (scp, file drop,  |    - CDP attach to Chrome   |
-   |    - filter by blocklist  |   or stdin pipe)   |    - Storage.setCookies per |
-   |    - output JSON          | ================>  |      browser context        |
+   |                           |                    |  agentcookie sink           |
+   |  agentcookie source       |                    |    - listen 100.x:9999/sync |
+   |    - read SQLite (RO)     |     AES-GCM        |    - decrypt seal           |
+   |    - decrypt w/ local key |    over HTTP       |    - filter by allowlist    |
+   |    - filter by blocklist  |    on tailnet      |    - CDP attach to Chrome   |
+   |    - wrap in envelope     | ================>  |    - Storage.setCookies per |
+   |    - seal w/ peer key     |    (WireGuard)     |      browser context        |
    +---------------------------+                    +-----------------------------+
+            ^                                                  ^
+            |                                                  |
+            +-----------  Tailscale tailnet  ------------------+
+            |             (WireGuard, ACLs)                    |
+            +--------------------------------------------------+
 
 No Keychain, no Chrome SQLite rewrite, no libsecret. Just live CDP injection.
+Tailscale required: sink MUST bind a 100.x address (refuses to start without tailnet).
 Security: missing policy = allowlist-empty (ship nothing) on Linux.
 ```
 

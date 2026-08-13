@@ -16,23 +16,13 @@ Firefox and Safari have different cookie stores entirely; supporting them is rea
 
 ## What about Linux sinks?
 
-**Supported via `agentcookie import` (v0.14+).** The Linux receive path skips Chrome SQLite entirely (no Keychain, no libsecret) and instead injects cookies into a running Chrome via CDP:
+**Fully supported via Tailscale `/sync` (v0.14+).** The Linux receive path is the same continuous sync as macOS-to-macOS, but skips Chrome SQLite entirely (no Keychain, no libsecret) and instead injects cookies into a running Chrome via CDP.
 
-```bash
-# On Mac (source): export cookies
-agentcookie export > cookies.json
-chmod 600 cookies.json
-scp cookies.json linux-agent:/tmp/
+The sink receives the AES-GCM-sealed envelope over Tailscale, decrypts with the pairing-derived key, filters by the sink's allowlist, and injects via CDP's `Storage.setCookies` into every browser context. The target Chrome must be running with `--remote-debugging-port` (default 9223). This is the Grok Bot / agent-runtime path: the Linux box wakes up logged into source-allowlisted sites without a second login.
 
-# On Linux (sink): import into running Chrome
-agentcookie import -f /tmp/cookies.json
-```
-
-The target Chrome must be running with `--remote-debugging-port` (default 9223). This is the Grok Bot / agent-runtime path: the Linux box wakes up logged into source-allowlisted sites without a second login.
+**Tailscale required**: The Linux sink MUST bind a Tailscale 100.x address. It will refuse to start without a working tailnet connection. Run `tailscale status` to verify connectivity. Plaintext cookie JSON file transfers are NOT the supported Linux path — the tailnet (pairing + AES-GCM envelope + 100.x bind) is the trust boundary.
 
 **Security**: Missing policy on Linux defaults to allowlist-empty (ship nothing). You must explicitly configure which domains sync via `blocklist.yaml` with `policy: allowlist` and the domains you want.
-
-**Not yet**: Linux continuous `/sync` over Tailscale. Today's import path is one-shot; for continuous sync, use the macOS sink or implement a cron/watch loop around `export` + `import`.
 
 ## Will syncing cookies log me out of sites on the source machine?
 

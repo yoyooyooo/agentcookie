@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -67,6 +68,15 @@ func runSink(cmd *cobra.Command, args []string) error {
 	// 127.0.0.1 stays allowed for local-dev binding (operator typed it).
 	if err := validateListenAddr(cfg.Listen.Addr); err != nil {
 		return fmt.Errorf("sink listen %q: %w", cfg.Listen.Addr, err)
+	}
+
+	// Linux sink: require Tailscale 100.x in production. Localhost is
+	// allowed for tests but is not the documented Linux sink path.
+	if config.IsLinux() {
+		host, _, _ := net.SplitHostPort(cfg.Listen.Addr)
+		if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+			fmt.Fprintln(os.Stderr, "agentcookie sink: WARNING: localhost bind on Linux is for testing only. Production Linux sinks must bind a Tailscale 100.x address (run `tailscale status` to find your tailnet IP).")
+		}
 	}
 
 	// v0.12.0-beta.3 headless mode: when skip_chrome_sqlite is true, the
