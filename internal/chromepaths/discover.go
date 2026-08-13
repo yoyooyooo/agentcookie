@@ -275,6 +275,19 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// expandTilde turns a leading "~/" into the user's home dir. Leaves all other
+// paths alone. Matches config.ExpandTilde behavior.
+func expandTilde(p string) string {
+	if !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[2:])
+}
+
 // DiscoverForConfig returns stores that match the optional config constraints.
 // If profileDir is non-empty, it's treated as an explicit user-data-dir to
 // include in discovery. If profileDir contains profile subdirectories (Default,
@@ -286,7 +299,9 @@ func DiscoverForConfig(profileDir string) DiscoverResult {
 	// If an explicit profile dir is given (e.g. from config cdp.profile_dir),
 	// add it if not already in the result.
 	if profileDir != "" {
-		abs, err := filepath.Abs(profileDir)
+		// Expand ~ to home directory before filepath.Abs (which treats ~ as literal).
+		expanded := expandTilde(profileDir)
+		abs, err := filepath.Abs(expanded)
 		if err == nil {
 			// Check if any discovered stores already cover this path.
 			found := false

@@ -433,6 +433,39 @@ func TestDiscoverForConfig_ScansUserDataDir(t *testing.T) {
 	}
 }
 
+// TestDiscoverForConfig_ExpandsTilde verifies that DiscoverForConfig expands
+// ~ to the home directory. filepath.Abs treats ~ as a literal path component,
+// so we must expand it first.
+func TestDiscoverForConfig_ExpandsTilde(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a user-data-dir under HOME with Default/Cookies.
+	chromeProfile := filepath.Join(home, "chrome-profile")
+	defaultDir := filepath.Join(chromeProfile, "Default")
+	if err := os.MkdirAll(defaultDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cookiesPath := filepath.Join(defaultDir, "Cookies")
+	if err := os.WriteFile(cookiesPath, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use tilde shorthand - this should expand to home/chrome-profile.
+	result := DiscoverForConfig("~/chrome-profile")
+
+	found := false
+	for _, s := range result.Stores {
+		if s.Root == chromeProfile && s.Profile == "Default" && s.CookiesPath == cookiesPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("DiscoverForConfig(\"~/chrome-profile\") should find Default/Cookies under home")
+	}
+}
+
 func TestProfileNameAllowlist(t *testing.T) {
 	cases := []struct {
 		name    string
