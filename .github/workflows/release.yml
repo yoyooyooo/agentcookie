@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  # Build Linux binaries on Ubuntu (CGO_ENABLED=1 requires native gcc)
+  # Build Linux binaries on Ubuntu using .goreleaser.linux.yaml
   build-linux:
     runs-on: ubuntu-latest
     if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
@@ -29,41 +29,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      # Build Linux amd64
-      - name: build linux amd64
-        run: |
-          CGO_ENABLED=1 go build -ldflags "-s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version=${{ github.ref_name }}" -o dist/linux-amd64/agentcookie ./cmd/agentcookie
+      # Use goreleaser with the linux-specific config
+      - name: goreleaser linux
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --config .goreleaser.linux.yaml --skip=publish
         env:
-          GOOS: linux
-          GOARCH: amd64
-
-      # Build Linux arm64
-      - name: build linux arm64
-        run: |
-          CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -ldflags "-s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version=${{ github.ref_name }}" -o dist/linux-arm64/agentcookie ./cmd/agentcookie
-        env:
-          GOOS: linux
-          GOARCH: arm64
-
-      # Create tarballs with the frozen naming scheme
-      - name: create linux tarballs
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"  # Strip leading v
-          
-          mkdir -p release
-          
-          # Linux amd64
-          tar -czvf "release/agentcookie_${VERSION}_linux_amd64.tar.gz" -C dist/linux-amd64 agentcookie
-          
-          # Linux arm64
-          tar -czvf "release/agentcookie_${VERSION}_linux_arm64.tar.gz" -C dist/linux-arm64 agentcookie
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: upload linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: release/*.tar.gz
+          path: dist/*.tar.gz
 
   # Build darwin binaries on macOS (codesigning requires macOS)
   build-darwin:

@@ -124,14 +124,31 @@ agentcookie pair --as sink \
   --pair-url <pair_url-from-pairing.json>
 ```
 
-### Step 4: start Chrome with CDP enabled
+### Step 4: attach to existing Chrome (or start one as fallback)
+
+On Grok Bot and most agent runtimes, Chrome is already running with a debug port. Probe before starting a new one:
 
 ```bash
-google-chrome --remote-debugging-port=9223 &
-# Or headless: google-chrome --remote-debugging-port=9223 --headless=new &
+# Check if Chrome is already listening on common debug ports
+for port in 9223 9222 9224 9228 9229; do
+  if curl -s "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
+    echo "Chrome found on port ${port}"
+    # Update sink.yaml to use this port
+    sed -i "s|endpoint: http://127.0.0.1:.*|endpoint: http://127.0.0.1:${port}|" \
+      ~/.config/agentcookie/sink.yaml
+    break
+  fi
+done
 ```
 
-If Chrome runs on a different port (e.g., 9228), update `live_cdp.endpoint` in sink.yaml.
+If no Chrome is listening, start one as a fallback:
+
+```bash
+# Only if no existing Chrome debug port was found
+google-chrome --remote-debugging-port=9223 &
+```
+
+Starting a second Chrome when one is already running on the same port causes conflicts. Always probe first.
 
 ### Step 5: start the sink
 

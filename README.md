@@ -2,7 +2,7 @@
 
 Your agent runs on a Linux box (a Grok Bot VM, a cloud agent runtime, a homelab server) and needs to act as you on every site you're already logged into. agentcookie keeps that box's Chrome session in sync with your Mac's, continuously, encrypted over your Tailscale tailnet, with zero per-site auth ceremony.
 
-The Linux Chrome wakes up logged in. browserUse, Puppeteer, Playwright, or any Chromium automation that connects to Chrome's debug port sees your session already there.
+Cookie-authenticated sites show the logged-in UI after live CDP inject. Google/Workspace sessions stay logged out unless a human signed in on the box (DBSC binds those sessions to device keys). browserUse, Puppeteer, Playwright, or any Chromium automation that connects to Chrome's debug port sees your non-DBSC sessions already there.
 
 ## What it looks like
 
@@ -160,17 +160,36 @@ Replace:
 - `your-mac.tailnet` with your Mac's Tailscale hostname (`tailscale status` on either machine)
 - The pairing code and URL with the values printed by the Mac source wizard
 
-### Start Chrome with CDP enabled
+### Attach to the existing Chrome (or start one as fallback)
+
+On Grok Bot and most agent runtimes, Chrome is already running with a debug port. Probe before starting a new one:
 
 ```bash
-# On Linux, start Chrome with the debug port
+# Check if Chrome is already listening on common debug ports
+for port in 9223 9222 9224 9228 9229; do
+  if curl -s "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
+    echo "Chrome found on port ${port}"
+    # Update sink.yaml to use this port
+    sed -i "s|endpoint: http://127.0.0.1:.*|endpoint: http://127.0.0.1:${port}|" \
+      ~/.config/agentcookie/sink.yaml
+    break
+  fi
+done
+```
+
+If no Chrome is listening, start one as a fallback:
+
+```bash
+# Only if no existing Chrome debug port was found
 google-chrome --remote-debugging-port=9223 &
 
 # Or headless
 google-chrome --remote-debugging-port=9223 --headless=new &
 ```
 
-If Chrome runs on a different port (e.g., 9228), update `live_cdp.endpoint` in sink.yaml.
+Starting a second Chrome when one is already running on the same port causes conflicts (the KTD2 failure mode). Always probe first.
+
+You can also use `agentcookie doctor` which probes ports 9222, 9223, 9224, 9228, 9229, and 9400 and reports which endpoint is reachable.
 
 ### Start the sink
 
