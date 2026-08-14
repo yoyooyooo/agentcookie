@@ -246,6 +246,44 @@ func TestFindPPCLI_NonExecutableFileShadowsNothing(t *testing.T) {
 	}
 }
 
+func TestFindPPCLI_OtherExecuteOnlyShadowsNothing(t *testing.T) {
+	// A file with only "other" execute permission (mode 0001) at the preferred
+	// location should NOT shadow a valid user-executable file at a later location.
+	// The test process owns the file, so it cannot execute a file that only has
+	// other-execute permission. This tests that unix.Access is correctly used
+	// to check actual executability, not just mode bits.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PATH", "")
+
+	localBin := filepath.Join(tmpHome, ".local", "bin")
+	goBin := filepath.Join(tmpHome, "go", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a file with only other-execute permission at .local/bin (mode 0001).
+	// The test process is the owner, so it cannot execute this file.
+	localPath := filepath.Join(localBin, "instacart-pp-cli")
+	if err := os.WriteFile(localPath, []byte("#!/bin/bash\nexit 0\n"), 0o001); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a valid user-executable at go/bin.
+	goPath := filepath.Join(goBin, "instacart-pp-cli")
+	if err := os.WriteFile(goPath, []byte("#!/bin/bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findPPCLI("instacart-pp-cli")
+	if got != goPath {
+		t.Errorf("other-execute-only at .local/bin should not shadow go/bin: got %q, want %q", got, goPath)
+	}
+}
+
 func TestFindPPCLI_NonExecutableEverywhere_ReturnsDefault(t *testing.T) {
 	// If only non-executable files exist, should return default path for error messages.
 	tmpHome := t.TempDir()
@@ -319,5 +357,19 @@ func TestIsExecutableFile(t *testing.T) {
 	}
 	if !isExecutableFile(userExecPath) {
 		t.Errorf("isExecutableFile(%q) = false, want true for mode 0100 (user exec)", userExecPath)
+	}
+
+	// Test other-execute only (mode 0001). The file owner cannot execute this
+	// file because the execute bit is only for "other" users. This verifies
+	// that isExecutableFile uses unix.Access (which checks actual executability)
+	// rather than just checking mode bits.
+	otherExecPath := filepath.Join(dir, "otherexec")
+	if err := os.WriteFile(otherExecPath, []byte("#!/bin/bash\n"), 0o001); err != nil {
+		t.Fatal(err)
+	}
+	// The test process is the file owner, so it should NOT be able to execute
+	// a file with only other-execute permission.
+	if isExecutableFile(otherExecPath) {
+		t.Errorf("isExecutableFile(%q) = true, want false for mode 0001 (other exec only, owner cannot execute)", otherExecPath)
 	}
 }

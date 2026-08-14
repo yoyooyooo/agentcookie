@@ -71,22 +71,3 @@ func findPPCLI(name string, aliases ...string) string {
 	// previous behavior of findInstacartBinary.
 	return filepath.Join(wellKnownDirs[0], name)
 }
-
-// isRegularFile reports whether path exists and is a regular file.
-func isRegularFile(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
-}
-
-// isExecutableFile reports whether path exists, is a regular file, and has
-// at least one execute bit set (user, group, or other). This prevents a
-// non-executable junk file from shadowing a valid executable in a later
-// directory.
-func isExecutableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	// Check if any execute bit is set (0111 = user/group/other execute).
-	return info.Mode().Perm()&0111 != 0
-}
