@@ -288,6 +288,8 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 - Mac to Mac continuous sync (second Mac, Mac mini)
 - Live CDP injection on Linux (cookies go into Chrome's in-memory store)
 - Three cookie delivery surfaces on macOS sink (Chrome SQLite, plaintext sidecar, per-CLI adapters)
+- Extra Chrome profile discovery: Mac profiles (Profile 1, Profile 2, etc.) are auto-discovered and decrypted; extra-profile cookies flow to sidecar, adapters, and live CDP alongside Default profile cookies
+- Sink adapters union extra-profile cookies through the same blocklist policy
 - Per-CLI secrets bus for bearer tokens and API keys
 - 520+ unit tests across 26 packages
 
@@ -298,6 +300,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 - CDP port is loopback-only; same-user processes can attach and read injected cookies
 - Sidecar at `~/.agentcookie/cookies-plain.db` is plaintext at rest (not a success metric; verify with live CDP)
 - Google/DBSC cookies need local sign-in on the sink; copied cookies expire in minutes
+- Linux extra-profile Chrome SQLite stays unread (no libsecret); discovery and doctor/status name stores, but decryption requires macOS Keychain
 - No live key rotation yet; re-run wizard on both sides to rotate
 - Cookie values never appear in logs; do not use `cookies --json` as a verify step
 

@@ -13,6 +13,14 @@ The 1.0 release ships Mac to Linux cookie sync as the featured path. Your Mac's 
 - No Chrome SQLite write on Linux (expected; success is the live CDP inject line)
 - Tailscale-only transport with AES-256-GCM sealed envelopes
 
+### Extra Chrome profile discovery (#115, #116)
+
+- Mac extra Chrome profiles (Profile 1, Profile 2, etc.) are auto-discovered and decrypted
+- Extra-profile cookies flow to the sidecar, adapters, and live CDP alongside Default profile cookies
+- Sink adapters union extra-profile cookies through the same blocklist policy
+- `agentcookie doctor` and `agentcookie status` report discovered profile stores
+- Linux: discovery and doctor/status name stores, but Chrome SQLite is not decrypted (no libsecret); sidecar/plaintext and live CDP remain the Linux path
+
 **Install:**
 
 Download from [GitHub Releases](https://github.com/mvanhorn/agentcookie/releases/tag/v1.0.0). Verify against `checksums.txt`. See the README for the full how-to.
