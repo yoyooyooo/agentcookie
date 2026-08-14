@@ -44,18 +44,27 @@ type TableReservationAdapter struct {
 func NewTableReservation() *TableReservationAdapter {
 	home, _ := os.UserHomeDir()
 	return &TableReservationAdapter{
-		binary:    filepath.Join(home, "go", "bin", "table-reservation-goat-pp-cli"),
+		binary:    findPPCLI("table-reservation-goat-pp-cli"),
 		configDir: filepath.Join(home, ".config", "table-reservation-goat-pp-cli"),
 	}
 }
 
 func (a *TableReservationAdapter) Name() string { return "table-reservation-goat-pp-cli" }
 
-func (a *TableReservationAdapter) CLIBinary() string { return a.binary }
+// resolveBinary returns the binary path to use. If the stored binary path
+// exists (e.g., set directly in tests), use it. Otherwise, re-resolve via
+// findPPCLI to handle binaries installed after init().
+func (a *TableReservationAdapter) resolveBinary() string {
+	if a.binary != "" && isRegularFile(a.binary) {
+		return a.binary
+	}
+	return findPPCLI("table-reservation-goat-pp-cli")
+}
+
+func (a *TableReservationAdapter) CLIBinary() string { return a.resolveBinary() }
 
 func (a *TableReservationAdapter) IsInstalled() bool {
-	info, err := os.Stat(a.binary)
-	return err == nil && !info.IsDir()
+	return isRegularFile(a.resolveBinary())
 }
 
 func (a *TableReservationAdapter) CookieHostPatterns() []string {

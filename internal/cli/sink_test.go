@@ -556,3 +556,101 @@ func (f *sinkHandlerFixture) sidecarHostsOrEmpty() []string {
 	}
 	return f.sidecarHosts()
 }
+
+// TestCookieDedupeKey verifies the deduplication key includes host+name+path.
+func TestCookieDedupeKey(t *testing.T) {
+	c1 := chrome.Cookie{HostKey: ".instacart.com", Name: "_session", Path: "/"}
+	c2 := chrome.Cookie{HostKey: ".instacart.com", Name: "_session", Path: "/api"}
+
+	key1 := cookieDedupeKey(c1)
+	key2 := cookieDedupeKey(c2)
+
+	if key1 == key2 {
+		t.Errorf("cookies with different paths should have different dedupe keys")
+	}
+
+	// Same cookie should have same key.
+	c3 := chrome.Cookie{HostKey: ".instacart.com", Name: "_session", Path: "/"}
+	if cookieDedupeKey(c1) != cookieDedupeKey(c3) {
+		t.Errorf("identical cookies should have same dedupe key")
+	}
+}
+
+// TestUnionCookiesWithExtraProfiles_EnvelopeOnlyOnLinux verifies that on
+// Linux, only envelope cookies are returned (no Chrome SQLite decrypt).
+func TestUnionCookiesWithExtraProfiles_EnvelopeOnlyOnLinux(t *testing.T) {
+	if !config.IsLinux() {
+		t.Skip("skipping: this test is Linux-specific")
+	}
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	envelopeCookies := []chrome.Cookie{
+		{HostKey: ".instacart.com", Name: "_session", Value: "env123", Path: "/"},
+		{HostKey: ".airbnb.com", Name: "_aat", Value: "envtoken", Path: "/"},
+	}
+
+	result := unionCookiesWithExtraProfiles(envelopeCookies, "")
+
+	// On Linux, should return only envelope cookies.
+	if len(result) != len(envelopeCookies) {
+		t.Errorf("on Linux, union should return only envelope cookies; got %d, want %d", len(result), len(envelopeCookies))
+	}
+	for i, c := range result {
+		if c.Value != envelopeCookies[i].Value {
+			t.Errorf("cookie %d: got Value %q, want %q", i, c.Value, envelopeCookies[i].Value)
+		}
+	}
+}
+
+// TestUnionCookiesWithExtraProfiles_EmptyEnvelope verifies that empty
+// envelope cookies returns empty on Linux (no profiles to read).
+func TestUnionCookiesWithExtraProfiles_EmptyEnvelope(t *testing.T) {
+	if !config.IsLinux() {
+		t.Skip("skipping: Linux-specific behavior test")
+	}
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	result := unionCookiesWithExtraProfiles(nil, "")
+
+	if len(result) != 0 {
+		t.Errorf("empty envelope on Linux should return empty; got %d cookies", len(result))
+	}
+}
+
+// TestUnionCookiesWithExtraProfiles_EnvelopeWins verifies that envelope
+// cookies take priority over extra profile cookies on host+name+path collisions.
+// This test is conceptual - it verifies the deduplication logic.
+func TestUnionCookiesWithExtraProfiles_DeduplicationLogic(t *testing.T) {
+	// Test the dedupe logic directly since we can't easily set up Chrome
+	// profiles in a unit test. The full integration is tested separately.
+	envelopeCookies := []chrome.Cookie{
+		{HostKey: ".instacart.com", Name: "_session", Value: "envelope-value", Path: "/"},
+	}
+
+	// Build seen map the same way unionCookiesWithExtraProfiles does.
+	seen := make(map[string]bool)
+	for _, c := range envelopeCookies {
+		key := cookieDedupeKey(c)
+		seen[key] = true
+	}
+
+	// A hypothetical extra-profile cookie with the same host+name+path.
+	extraCookie := chrome.Cookie{HostKey: ".instacart.com", Name: "_session", Value: "extra-value", Path: "/"}
+	extraKey := cookieDedupeKey(extraCookie)
+
+	if !seen[extraKey] {
+		t.Errorf("extra cookie with same host+name+path should be skipped by dedupe logic")
+	}
+
+	// Different path should not be skipped.
+	diffPathCookie := chrome.Cookie{HostKey: ".instacart.com", Name: "_session", Value: "diff-path", Path: "/api"}
+	diffPathKey := cookieDedupeKey(diffPathCookie)
+
+	if seen[diffPathKey] {
+		t.Errorf("cookie with different path should not be skipped")
+	}
+}
