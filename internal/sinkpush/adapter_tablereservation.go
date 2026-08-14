@@ -52,10 +52,11 @@ func NewTableReservation() *TableReservationAdapter {
 func (a *TableReservationAdapter) Name() string { return "table-reservation-goat-pp-cli" }
 
 // resolveBinary returns the binary path to use. If the stored binary path
-// exists (e.g., set directly in tests), use it. Otherwise, re-resolve via
-// findPPCLI to handle binaries installed after init().
+// is executable (e.g., set directly in tests), use it. Otherwise, re-resolve
+// via findPPCLI to handle binaries installed after init() and to avoid using
+// a non-executable cached path that would shadow a valid executable elsewhere.
 func (a *TableReservationAdapter) resolveBinary() string {
-	if a.binary != "" && isRegularFile(a.binary) {
+	if a.binary != "" && isExecutableFile(a.binary) {
 		return a.binary
 	}
 	return findPPCLI("table-reservation-goat-pp-cli")
@@ -64,7 +65,7 @@ func (a *TableReservationAdapter) resolveBinary() string {
 func (a *TableReservationAdapter) CLIBinary() string { return a.resolveBinary() }
 
 func (a *TableReservationAdapter) IsInstalled() bool {
-	return isRegularFile(a.resolveBinary())
+	return isExecutableFile(a.resolveBinary())
 }
 
 func (a *TableReservationAdapter) CookieHostPatterns() []string {

@@ -42,10 +42,11 @@ func NewInstacart() *InstacartAdapter {
 func (a *InstacartAdapter) Name() string { return "instacart-pp-cli" }
 
 // resolveBinary returns the binary path to use. If the stored binary path
-// exists (e.g., set directly in tests), use it. Otherwise, re-resolve via
-// findPPCLI to handle binaries installed after init().
+// is executable (e.g., set directly in tests), use it. Otherwise, re-resolve
+// via findPPCLI to handle binaries installed after init() and to avoid using
+// a non-executable cached path that would shadow a valid executable elsewhere.
 func (a *InstacartAdapter) resolveBinary() string {
-	if a.binary != "" && isRegularFile(a.binary) {
+	if a.binary != "" && isExecutableFile(a.binary) {
 		return a.binary
 	}
 	return findPPCLI("instacart-pp-cli", "instacart")
@@ -54,7 +55,7 @@ func (a *InstacartAdapter) resolveBinary() string {
 func (a *InstacartAdapter) CLIBinary() string { return a.resolveBinary() }
 
 func (a *InstacartAdapter) IsInstalled() bool {
-	return isRegularFile(a.resolveBinary())
+	return isExecutableFile(a.resolveBinary())
 }
 
 func (a *InstacartAdapter) CookieHostPatterns() []string {
