@@ -7,7 +7,8 @@ before:
     - go mod tidy
 
 builds:
-  - id: agentcookie
+  # Darwin build: runs on macos-latest, codesigned
+  - id: agentcookie-darwin
     main: ./cmd/agentcookie
     binary: agentcookie
     env:
@@ -19,14 +20,37 @@ builds:
       - amd64
     ldflags:
       - -s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version={{ .Version }}
-    # Sign each darwin binary in place before it is archived. Uses
-    # scripts/sign.sh so the local + release pipelines share one
-    # codesign invocation. AGENTCOOKIE_SIGN_IDENTITY is set by the
-    # release workflow (and defaults inside scripts/sign.sh if unset).
     hooks:
       post:
         - cmd: scripts/sign.sh {{ .Path }}
           output: true
+
+  # Linux amd64 build: runs on ubuntu-latest with default gcc
+  - id: agentcookie-linux-amd64
+    main: ./cmd/agentcookie
+    binary: agentcookie
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - -s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version={{ .Version }}
+
+  # Linux arm64 build: runs on ubuntu-latest with cross-compiler
+  - id: agentcookie-linux-arm64
+    main: ./cmd/agentcookie
+    binary: agentcookie
+    env:
+      - CGO_ENABLED=1
+      - CC=aarch64-linux-gnu-gcc
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - -s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version={{ .Version }}
 
 archives:
   - id: agentcookie

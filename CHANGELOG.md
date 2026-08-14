@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.0.0] - 2026-08-13
+
+### Featured: Mac to Linux continuous sync
+
+The 1.0 release ships Mac to Linux cookie sync as the featured path. Your Mac's Chrome sessions flow to a Linux agent runtime (Grok Bot, cloud VM, homelab server) via live CDP injection over Tailscale.
+
+**What's new:**
+
+- Linux binaries: `agentcookie_1.0.0_linux_amd64.tar.gz` and `agentcookie_1.0.0_linux_arm64.tar.gz`
+- Live CDP injection on Linux: cookies go into Chrome's in-memory store via `Storage.setCookies`
+- No Chrome SQLite write on Linux (expected; success is the live CDP inject line)
+- Tailscale-only transport with AES-256-GCM sealed envelopes
+
+**Install:**
+
+Download from [GitHub Releases](https://github.com/mvanhorn/agentcookie/releases/tag/v1.0.0). Verify against `checksums.txt`. See the README for the full how-to.
+
+**Security defaults:**
+
+- Linux sinks with missing `blocklist.yaml` or omitted `policy:` ship nothing (allowlist-empty). This is security-by-default.
+- For a single-operator trusted box, write `blocklist.yaml` with `policy: blocklist` and `domains: []` to enable sync-all.
+- The 1.0 release does NOT change this default in code. A later release may flip the default, which would be a breaking change.
+
+**Honest limits:**
+
+- Linux `wrote 0 cookies` is expected (success is live CDP inject)
+- Google/DBSC cookies need local sign-in on the sink; copied cookies expire in minutes
+- CDP port is loopback-only; same-user processes can attach to the debug port
+- Cookie values never appear in logs
+
+**Breaking changes from beta:**
+
+- Archive naming changed to underscores: `agentcookie_1.0.0_darwin_arm64.tar.gz` (was `agentcookie-VERSION-darwin-arm64.tar.gz`)
+- `install-beta.sh` pattern updated to match new archive names
+
 ## [Unreleased]
 
 ### Cookie allowlist policy
