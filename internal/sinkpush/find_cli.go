@@ -45,9 +45,11 @@ func findPPCLI(name string, aliases ...string) string {
 	}
 
 	// Check well-known directories first (handles stripped PATH).
+	// Require executable permission to avoid a non-executable junk file
+	// shadowing a valid executable in a later directory.
 	for _, dir := range wellKnownDirs {
 		path := filepath.Join(dir, name)
-		if isRegularFile(path) {
+		if isExecutableFile(path) {
 			return path
 		}
 	}
@@ -74,4 +76,17 @@ func findPPCLI(name string, aliases ...string) string {
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// isExecutableFile reports whether path exists, is a regular file, and has
+// at least one execute bit set (user, group, or other). This prevents a
+// non-executable junk file from shadowing a valid executable in a later
+// directory.
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	// Check if any execute bit is set (0111 = user/group/other execute).
+	return info.Mode().Perm()&0111 != 0
 }

@@ -342,13 +342,18 @@ func newSinkMux(
 		// on this sink machine before running adapters. This ensures adapters
 		// see the same cookie set that `cookies --domain` outputs, including
 		// extra-profile cookies (Darwin only; Linux uses sidecar/plaintext).
+		//
+		// P1 fix: union first, then check length. This ensures extra-profile
+		// cookies are processed even when the envelope is empty/fully filtered.
+		// The union function also filters extra-profile cookies through the
+		// blocklist so opted-out domains never reach adapters.
 		var adapterResults []sinkpush.Result
-		if len(cookies) > 0 {
-			profileDir := ""
-			if cfg.CDP.ProfileDir != "" {
-				profileDir = cfg.CDP.ProfileDir
-			}
-			unionedCookies := unionCookiesWithExtraProfiles(cookies, profileDir)
+		profileDir := ""
+		if cfg.CDP.ProfileDir != "" {
+			profileDir = cfg.CDP.ProfileDir
+		}
+		unionedCookies := unionCookiesWithExtraProfiles(cookies, profileDir, blockMatcher)
+		if len(unionedCookies) > 0 {
 			adapterResults = sinkpush.RunAll(unionedCookies)
 			logAdapterResults(adapterResults)
 		}
@@ -651,6 +656,8 @@ func replaceLevelDBDir(payload []byte, liveDir string) (int, error) {
 // unionCookiesWithExtraProfiles unions the envelope cookies (from source sync)
 // with any extra Chrome profiles discovered on the sink machine. The envelope
 // cookies (which live in the sidecar) take priority on host+name+path collisions.
+// The blockMatcher filters extra-profile cookies through the same blocklist
+// that envelope cookies use, ensuring opted-out domains never reach adapters.
 //
 // On Darwin, extra profiles are decrypted via the existing Keychain path.
 // On Linux, only envelope cookies are returned (Chrome SQLite decrypt requires
@@ -658,7 +665,7 @@ func replaceLevelDBDir(payload []byte, liveDir string) (int, error) {
 //
 // This ensures that adapters (via sinkpush.RunAll) see the same cookie union
 // that `cookies --domain` outputs, including extra-profile cookies.
-func unionCookiesWithExtraProfiles(envelopeCookies []chrome.Cookie, profileDir string) []chrome.Cookie {
+func unionCookiesWithExtraProfiles(envelopeCookies []chrome.Cookie, profileDir string, blockMatcher *protocol.BlocklistMatcher) []chrome.Cookie {
 	if runtime.GOOS != "darwin" {
 		// Linux: no Chrome SQLite decrypt support. Sidecar/plaintext only.
 		return envelopeCookies
@@ -718,6 +725,11 @@ func unionCookiesWithExtraProfiles(envelopeCookies []chrome.Cookie, profileDir s
 
 			for _, c := range cookies {
 				if c.Value == "" {
+					continue
+				}
+				// P1 fix: filter extra-profile cookies through the blocklist
+				// so opted-out domains never reach adapters.
+				if blockMatcher != nil && !blockMatcher.ShouldSyncHost(c.HostKey) {
 					continue
 				}
 				cookieKey := cookieDedupeKey(c)

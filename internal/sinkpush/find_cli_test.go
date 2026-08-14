@@ -211,3 +211,113 @@ func TestFindPPCLI_TableReservation_LocalBin(t *testing.T) {
 		t.Errorf("findPPCLI(table-reservation) with .local/bin: got %q, want %q", got, localPath)
 	}
 }
+
+func TestFindPPCLI_NonExecutableFileShadowsNothing(t *testing.T) {
+	// A non-executable file at ~/.local/bin should NOT shadow a valid
+	// executable at ~/go/bin. This is P1 fix #3: unusable file shadows valid CLI.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PATH", "")
+
+	localBin := filepath.Join(tmpHome, ".local", "bin")
+	goBin := filepath.Join(tmpHome, "go", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a non-executable file at .local/bin (mode 0644, no execute bits).
+	localPath := filepath.Join(localBin, "instacart-pp-cli")
+	if err := os.WriteFile(localPath, []byte("junk file, not executable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a valid executable at go/bin.
+	goPath := filepath.Join(goBin, "instacart-pp-cli")
+	if err := os.WriteFile(goPath, []byte("#!/bin/bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findPPCLI("instacart-pp-cli")
+	if got != goPath {
+		t.Errorf("non-executable at .local/bin should not shadow go/bin: got %q, want %q", got, goPath)
+	}
+}
+
+func TestFindPPCLI_NonExecutableEverywhere_ReturnsDefault(t *testing.T) {
+	// If only non-executable files exist, should return default path for error messages.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("PATH", "")
+
+	localBin := filepath.Join(tmpHome, ".local", "bin")
+	goBin := filepath.Join(tmpHome, "go", "bin")
+	if err := os.MkdirAll(localBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Put non-executable files at both locations.
+	if err := os.WriteFile(filepath.Join(localBin, "instacart-pp-cli"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBin, "instacart-pp-cli"), []byte("junk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findPPCLI("instacart-pp-cli")
+	// Should return default path for error messages since nothing is executable.
+	expected := filepath.Join(tmpHome, ".local", "bin", "instacart-pp-cli")
+	if got != expected {
+		t.Errorf("no executable anywhere should return default: got %q, want %q", got, expected)
+	}
+}
+
+func TestIsExecutableFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Test executable file (mode 0755).
+	execPath := filepath.Join(dir, "exec")
+	if err := os.WriteFile(execPath, []byte("#!/bin/bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !isExecutableFile(execPath) {
+		t.Errorf("isExecutableFile(%q) = false, want true for mode 0755", execPath)
+	}
+
+	// Test non-executable file (mode 0644).
+	nonExecPath := filepath.Join(dir, "nonexec")
+	if err := os.WriteFile(nonExecPath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if isExecutableFile(nonExecPath) {
+		t.Errorf("isExecutableFile(%q) = true, want false for mode 0644", nonExecPath)
+	}
+
+	// Test directory (even with execute bit, should be false).
+	dirPath := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if isExecutableFile(dirPath) {
+		t.Errorf("isExecutableFile(%q) = true, want false for directory", dirPath)
+	}
+
+	// Test non-existent path.
+	if isExecutableFile(filepath.Join(dir, "nonexistent")) {
+		t.Error("isExecutableFile for nonexistent path = true, want false")
+	}
+
+	// Test user-execute only (mode 0100).
+	userExecPath := filepath.Join(dir, "userexec")
+	if err := os.WriteFile(userExecPath, []byte("#!/bin/bash\n"), 0o100); err != nil {
+		t.Fatal(err)
+	}
+	if !isExecutableFile(userExecPath) {
+		t.Errorf("isExecutableFile(%q) = false, want true for mode 0100 (user exec)", userExecPath)
+	}
+}
