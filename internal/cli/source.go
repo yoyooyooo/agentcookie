@@ -352,17 +352,19 @@ func pushOnce(
 	var lsTarball []byte
 	var idbTarball []byte
 	var idbSkipped []string
-	if lt, _, err := chromedirsync.Pack(sourceBrowser.LocalStorageLevelDB(cfg.Browser.Profile), 0); err == nil {
+	cookiesOnly := os.Getenv("AGENTCOOKIE_COOKIES_ONLY") == "1"
+	// IndexedDB is opt-in (typical dirs are 400MB+). Local Storage is packed
+	// by default, but a busy Dia/Chrome profile can still be tens of MB and
+	// blow the Tailscale POST. AGENTCOOKIE_COOKIES_ONLY=1 skips both.
+	if cookiesOnly {
+		fmt.Fprintln(os.Stderr, "agentcookie source: AGENTCOOKIE_COOKIES_ONLY=1; skipping localStorage and indexedDB")
+	} else if lt, _, err := chromedirsync.Pack(sourceBrowser.LocalStorageLevelDB(cfg.Browser.Profile), 0); err == nil {
 		lsTarball = lt
 	} else if !errors.Is(err, chromedirsync.ErrSourceMissing) {
 		fmt.Fprintf(os.Stderr, "agentcookie source: localStorage pack failed (%v); continuing without it\n", err)
 	}
-	// IndexedDB is opt-in for v0.7: typical user dirs are 400MB+ (Gmail caches,
-	// Slack message history) and inlining that in the JSON envelope blows
-	// past the source-side POST timeout. Most PP CLIs auth via localStorage
-	// or cookies; IndexedDB is rarely an auth-state surface in practice.
 	// Set AGENTCOOKIE_SYNC_INDEXEDDB=1 to opt in.
-	if os.Getenv("AGENTCOOKIE_SYNC_INDEXEDDB") == "1" {
+	if !cookiesOnly && os.Getenv("AGENTCOOKIE_SYNC_INDEXEDDB") == "1" {
 		if it, sk, err := chromedirsync.Pack(sourceBrowser.IndexedDBDir(cfg.Browser.Profile), 5*1024*1024); err == nil {
 			idbTarball = it
 			idbSkipped = sk
