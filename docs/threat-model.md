@@ -4,7 +4,7 @@ This document captures what agentcookie does and does not protect against. Read 
 
 ## What agentcookie does
 
-Continuously replicates Chrome session cookies from one macOS machine (the **source**, where the user logs in) to another (the **sink**, where AI agents run), with per-domain cookie policy filters on both sides. The default policy is opt-out blocklist/sync-all for compatibility; high-trust agent deployments can set `policy: allowlist` so only named cookie hosts sync. The replication is one-way and authenticated end-to-end with a pairing-derived symmetric key. Past v0.11, the sink also seals its on-disk cookie copies (sidecar SQLite and per-CLI session files) under a sink-local master key whose Keychain ACL pins the agentcookie binary plus each registered adapter binary.
+Continuously replicates Chromium session cookies from one authoritative macOS source browser to one or more sinks where AI agents run, with a global source policy, optional per-target source policies, and a final sink-side policy. Chrome, Brave, Edge, Arc, and Dia can act as the source adapter. Fan-out remains one-way: the source reads and decrypts once, narrows each target's Cookie set, then independently seals each target envelope with its pairing-derived key. A browser-only sink can set `live_cdp_only` so accepted cookies exist only in the running CDP browser and are never materialized to Chrome SQLite, sidecar, adapter, or secrets-bus files.
 
 ## Trust model
 
@@ -18,15 +18,17 @@ agentcookie trusts:
 
 ## What agentcookie protects against
 
-- Plaintext cookies in transit. Every payload is AES-256-GCM-sealed with a per-pair key. The key never appears unencrypted on the wire.
+- Plaintext cookies in transit. Every target payload is AES-256-GCM-sealed with that target's per-pair key. Fan-out does not reuse one sink's key for another sink, and keys never appear unencrypted on the wire.
 - Plaintext cookies at rest on the sink (opt-in in v0.12). The sealing infrastructure is shipped: when the `agentcookie-master` Keychain item is present, the sink's sidecar SQLite is stored as sealed envelopes per value and each adapter session file's secret-bearing fields are sealed under the same key. The wizard install does NOT create the master key by default in v0.12 because the PP CLI consumer-side of sealing (U12) has not shipped in cli-printing-press yet. Pass `wizard set-keychain-access --enable-sealing` to opt in once the matching PP CLI release lands. Until then, the sidecar and adapter session files are plaintext on disk; finding S5 (plaintext sidecar) stays open in the default configuration.
 - Plaintext access to Chrome's own cookie store on the sink. v0.12 replaces the v0.10 `-A` (any-app) Keychain ACL on the Chrome Safe Storage password with a `-T` per-binary list. Only the agentcookie sink and registered adapter binaries can decrypt Chrome's Cookies SQLite silently; everything else needs a user prompt.
 - Online brute force of the pairing code. v0.12: 12 base32 characters (64 bits of entropy) and a per-IP token bucket capped at 5 attempts before a 429.
 - MITM during pairing. X25519 + HKDF salted with the pairing code means an attacker who intercepts the channel without knowing the code derives a different key, and the next AEAD message fails its tag check.
 - Replay of captured payloads across sink restarts. v0.12: the sequence tracker is persisted to `~/.agentcookie/sequence.json` and reloaded at sink boot.
-- Source pushing disallowed cookies. The sink reads its own `blocklist.yaml` policy and drops cookies whose `host_key` is rejected, even if the source pushes them.
+- Compromise of one fan-out sink. The attacker obtains only that sink's accepted Cookie scope and paired key. Other targets use different keys and independently enforce their own allowlists. A source compromise remains authoritative for every configured target.
 - Source pushing cookies with control characters or path-traversal in name / value / host_key. v0.12 adds RFC 6265 token-character validation on name, control-char rejection on value, and a label-boundary suffix check that fixes the v0.11 unanchored match (e.g., `xopentable.com` no longer matched `opentable.com`).
-- Wrong-secret / unauthenticated requests. Both legacy `security.shared_secret` (now floored at 32 bytes) and paired keys gate every `/sync` call; AEAD tag mismatch returns 401.
+- Source pushing disallowed cookies. The sink reads its own `blocklist.yaml` policy and drops cookies whose `host_key` is rejected, even if the source pushes them.
+- Browser-only persistence. With `live_cdp_only`, the sink skips Chrome SQLite, sidecar, adapter, and secrets-bus writes. Cookie authority is materialized only in the running browser process; a sink restart requires the source to push again.
+- Wrong-secret / unauthenticated requests. Each paired key gates only its own `/sync` target; AEAD tag mismatch returns 401.
 - DoS via slow-loris and oversize bodies on the sink and pair listeners. v0.12 sets ReadHeaderTimeout (5s), ReadTimeout (60s), WriteTimeout (60s), IdleTimeout (120s), and an `http.MaxBytesReader`-enforced body cap (256 MB for `/sync`, 16 KB for `/pair`).
 - Path traversal and inode exhaustion in unpacked LocalStorage / IndexedDB tarballs. v0.12 rejects payloads over 256 MB, tarballs with more than 100,000 entries, members whose path resolves outside the staging directory, and symlink / hardlink / device members.
 - Listener bound to non-tailnet interfaces. v0.12 refuses to start the sink or pair listener on `0.0.0.0` and reads the Tailscale 100.x interface directly (or explicit loopback only when configured for local dev).

@@ -90,4 +90,4 @@ strings ~/.agentcookie/cookies-plain.db | head
 
 - The paired key store at `~/.config/agentcookie/keys/<peer>.json` is still on-disk plaintext JSON (mode 0600). The threat model has been honest about this since v0.1; v0.13 will migrate to Keychain.
 - agentcookie remains macOS-only on both ends. Linux / Windows support is roadmap.
-- The replication direction is still strictly source -> sink. There is no fan-out and no two-way merge.
+- The replication direction is strictly source -> sink. Fan-out supports multiple independently paired sinks; there is still no reverse sync or two-way merge.

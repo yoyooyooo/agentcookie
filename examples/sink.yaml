@@ -34,6 +34,11 @@ live_cdp:
   # Common alternatives: 9222, 9224, 9228, 9229
   endpoint: http://127.0.0.1:9223
 
+# Agent-browser/Fortress sinks can opt into a memory-only materialization
+# boundary. Cookies are injected into existing and future CDP contexts, while
+# Chrome SQLite, sidecar, CLI adapters, and secrets-bus files remain untouched.
+# live_cdp_only: true
+
 # Skip Chrome SQLite write. On Linux there's no Keychain and no way
 # to write Chrome's encrypted cookie database. All injection is via CDP.
 skip_chrome_sqlite: true

@@ -19,11 +19,12 @@ import (
 // legacy Security.SharedSecret field is kept for backwards compat with v0
 // configs that predate pairing.
 type SourceConfig struct {
-	Sink     SinkRef     `yaml:"sink" json:"sink"`
-	Chrome   ChromeRef   `yaml:"chrome" json:"chrome"`
-	Browser  BrowserRef  `yaml:"browser,omitempty" json:"browser,omitempty"`
-	Peer     PeerRef     `yaml:"peer,omitempty" json:"peer,omitempty"`
-	Security SecurityRef `yaml:"security,omitempty" json:"security,omitempty"`
+	Sink     SinkRef                    `yaml:"sink" json:"sink"`
+	Chrome   ChromeRef                  `yaml:"chrome" json:"chrome"`
+	Browser  BrowserRef                 `yaml:"browser,omitempty" json:"browser,omitempty"`
+	Peer     PeerRef                    `yaml:"peer,omitempty" json:"peer,omitempty"`
+	Security SecurityRef                `yaml:"security,omitempty" json:"security,omitempty"`
+	Targets  map[string]SourceTargetRef `yaml:"targets,omitempty" json:"targets,omitempty"`
 	// Cmux configures the same-machine local loop: `agentcookie cmux-sync`
 	// reads this machine's Chrome and injects into this machine's cmux
 	// browser. Independent of the sink/peer push path; absent = loop off.
@@ -55,10 +56,14 @@ type SinkConfig struct {
 	Peer             PeerRef     `yaml:"peer,omitempty" json:"peer,omitempty"`
 	Security         SecurityRef `yaml:"security,omitempty" json:"security,omitempty"`
 	SkipChromeSQLite bool        `yaml:"skip_chrome_sqlite,omitempty" json:"skip_chrome_sqlite,omitempty"`
-	CDP              CDPRef      `yaml:"cdp,omitempty" json:"cdp,omitempty"`
-	LiveCDP          LiveCDPRef  `yaml:"live_cdp,omitempty" json:"live_cdp,omitempty"`
-	Cmux             CmuxRef     `yaml:"cmux,omitempty" json:"cmux,omitempty"`
-	Delivery         string      `yaml:"delivery,omitempty" json:"delivery,omitempty"`
+	// LiveCDPOnly makes the sink an in-memory browser delivery endpoint. It
+	// skips Chrome SQLite, sidecar, adapter, and secrets-bus writes; cookies
+	// are delivered only to the running browser through LiveCDP.
+	LiveCDPOnly bool       `yaml:"live_cdp_only,omitempty" json:"live_cdp_only,omitempty"`
+	CDP         CDPRef     `yaml:"cdp,omitempty" json:"cdp,omitempty"`
+	LiveCDP     LiveCDPRef `yaml:"live_cdp,omitempty" json:"live_cdp,omitempty"`
+	Cmux        CmuxRef    `yaml:"cmux,omitempty" json:"cmux,omitempty"`
+	Delivery    string     `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 }
 
 // CmuxRef configures the cmux cookie-delivery surface (a fourth surface
@@ -115,6 +120,21 @@ type PeerRef struct {
 	Hostname string `yaml:"hostname" json:"hostname"`
 }
 
+type SourceTargetRef struct {
+	URL      string           `yaml:"url" json:"url"`
+	Peer     string           `yaml:"peer" json:"peer"`
+	Disabled bool             `yaml:"disabled,omitempty" json:"disabled,omitempty"`
+	Policy   CookiePolicy     `yaml:"policy,omitempty" json:"policy,omitempty"`
+	Domains  []BlocklistEntry `yaml:"domains,omitempty" json:"domains,omitempty"`
+}
+
+type NamedSourceTarget struct {
+	Name   string
+	URL    string
+	Peer   string
+	Policy *Blocklist
+}
+
 type SinkRef struct {
 	URL string `yaml:"url" json:"url"`
 }
@@ -168,19 +188,92 @@ func LoadSource(dir string) (*SourceConfig, error) {
 	if err := loadYAML(path, &cfg); err != nil {
 		return nil, err
 	}
-	if cfg.Sink.URL == "" {
-		return nil, fmt.Errorf("%s: sink.url is required", path)
+	legacyConfigured := cfg.Sink.URL != "" || cfg.Peer.Hostname != "" || cfg.Security.SharedSecret != ""
+	fanoutConfigured := len(cfg.Targets) > 0
+	if legacyConfigured && fanoutConfigured {
+		return nil, fmt.Errorf("%s: legacy sink/peer and targets cannot be configured together", path)
 	}
-	if cfg.Peer.Hostname == "" && cfg.Security.SharedSecret == "" {
-		return nil, fmt.Errorf("%s: either peer.hostname (paired key) or security.shared_secret (legacy) is required", path)
+	if !legacyConfigured && !fanoutConfigured {
+		return nil, fmt.Errorf("%s: configure either legacy sink/peer or at least one targets entry", path)
 	}
-	if err := validateSharedSecret(path, cfg.Security.SharedSecret); err != nil {
-		return nil, err
+	if legacyConfigured {
+		if cfg.Sink.URL == "" {
+			return nil, fmt.Errorf("%s: sink.url is required", path)
+		}
+		if cfg.Peer.Hostname == "" && cfg.Security.SharedSecret == "" {
+			return nil, fmt.Errorf("%s: either peer.hostname (paired key) or security.shared_secret (legacy) is required", path)
+		}
+		if err := validateSharedSecret(path, cfg.Security.SharedSecret); err != nil {
+			return nil, err
+		}
+	} else {
+		for name, target := range cfg.Targets {
+			if strings.TrimSpace(name) == "" {
+				return nil, fmt.Errorf("%s: targets contains an empty name", path)
+			}
+			if target.URL == "" {
+				return nil, fmt.Errorf("%s: targets.%s.url is required", path, name)
+			}
+			if target.Peer == "" {
+				return nil, fmt.Errorf("%s: targets.%s.peer is required", path, name)
+			}
+			if target.Policy != "" && target.Policy != CookiePolicyBlocklist && target.Policy != CookiePolicyAllowlist {
+				return nil, fmt.Errorf("%s: targets.%s.policy must be %q or %q", path, name, CookiePolicyBlocklist, CookiePolicyAllowlist)
+			}
+			for i, domain := range target.Domains {
+				if domain.Pattern == "" {
+					return nil, fmt.Errorf("%s: targets.%s.domains[%d].pattern is empty", path, name, i)
+				}
+			}
+		}
 	}
 	if err := resolveSourcePaths(path, &cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+// SelectSourceTargets resolves the configured push destinations. Legacy
+// source.yaml files produce one target named "legacy". Fan-out configs return
+// enabled targets in stable name order, optionally narrowed by selected names.
+func (cfg *SourceConfig) SelectSourceTargets(selected []string) ([]NamedSourceTarget, error) {
+	if len(cfg.Targets) == 0 {
+		if len(selected) > 0 {
+			return nil, fmt.Errorf("--target requires a source.yaml targets map")
+		}
+		return []NamedSourceTarget{{Name: "legacy", URL: cfg.Sink.URL, Peer: cfg.Peer.Hostname}}, nil
+	}
+
+	wanted := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		if _, ok := cfg.Targets[name]; !ok {
+			return nil, fmt.Errorf("unknown target %q", name)
+		}
+		wanted[name] = true
+	}
+
+	names := make([]string, 0, len(cfg.Targets))
+	for name, target := range cfg.Targets {
+		if target.Disabled || (len(wanted) > 0 && !wanted[name]) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("no enabled source targets selected")
+	}
+
+	targets := make([]NamedSourceTarget, 0, len(names))
+	for _, name := range names {
+		target := cfg.Targets[name]
+		var policy *Blocklist
+		if target.Policy != "" || len(target.Domains) > 0 {
+			policy = &Blocklist{Version: 1, Policy: target.Policy, Domains: append([]BlocklistEntry(nil), target.Domains...)}
+		}
+		targets = append(targets, NamedSourceTarget{Name: name, URL: target.URL, Peer: target.Peer, Policy: policy})
+	}
+	return targets, nil
 }
 
 // LoadSourceLocal loads source.yaml for local-only consumers like
@@ -263,6 +356,12 @@ func LoadSink(dir string) (*SinkConfig, error) {
 	// enable live CDP attach (inject into agent runtime's Chrome).
 	if IsLinux() {
 		applyLinuxSinkDefaults(&cfg)
+	}
+	if cfg.LiveCDPOnly && !cfg.LiveCDP.Enabled {
+		return nil, fmt.Errorf("%s: live_cdp_only requires live_cdp.enabled: true", path)
+	}
+	if cfg.LiveCDPOnly && cfg.CDP.Enabled {
+		return nil, fmt.Errorf("%s: live_cdp_only cannot be combined with managed cdp.enabled", path)
 	}
 	return &cfg, nil
 }

@@ -1,6 +1,6 @@
 # agentcookie
 
-Your agent runs on a Linux box (a Grok Bot VM, a cloud agent runtime, a homelab server) and needs to act as you on every site you're already logged into. agentcookie keeps that box's Chrome session in sync with your Mac's, continuously, encrypted over your Tailscale tailnet, with zero per-site auth ceremony.
+Your agents run on Linux boxes, Mac minis, cloud runtimes, or shared browser hosts and need to act as you on sites where your daily browser is already logged in. agentcookie treats that Mac browser as the single cookie source and keeps one or more target browsers synchronized over your Tailscale tailnet, with zero per-site auth ceremony.
 
 Cookie-authenticated sites show the logged-in UI after live CDP inject. Google/Workspace sessions stay logged out unless a human signed in on the box (DBSC binds those sessions to device keys). browserUse, Puppeteer, Playwright, or any Chromium automation that connects to Chrome's debug port sees your non-DBSC sessions already there.
 
@@ -29,7 +29,7 @@ Logging in twice. Once on your Mac, once again on the Linux box where your agent
 
 Tools that ship cookies between machines today assume a human is going to click "merge" or unlock a vault or open the destination browser. They were built for switching accounts between two laptops the same person uses. They weren't built for "the agent on the Grok Bot VM needs my session in 30 seconds and there's nobody home."
 
-agentcookie is the second pattern. One-way, continuous, unattended replication from the Mac you live in to the Linux box your agents act from. Pairing-derived per-peer keys, cookie policy filters on both sides, AES-256-GCM over the Tailscale tailnet's WireGuard channel. The hard parts (macOS Keychain protections, Chrome's App-Bound Encryption on the source, live CDP injection on the sink) are handled.
+agentcookie is the second pattern. One-way, continuous, unattended replication from the Mac you live in to the machines where your agents act. Each sink has its own pairing-derived key and cookie policy; a source fan-out never shares one sink's transport credential with another. AES-256-GCM runs inside the Tailscale WireGuard channel. The hard parts (macOS Keychain protections, Chromium cookie encryption on the source, live CDP injection on each sink) are handled.
 
 ## How it works
 
@@ -59,7 +59,30 @@ agentcookie source --watch
 No Keychain on Linux. No Chrome SQLite rewrite. Just live CDP injection.
 ```
 
-The sink injects cookies directly into Chrome's in-memory store via the Chrome DevTools Protocol. Chrome on the Linux box must be started with `--remote-debugging-port=9223` (or another port you configure). The inject happens on every sync and on every new browser context, so an agent that launches a fresh tab inherits the session immediately.
+The sink injects cookies directly into Chrome's in-memory store via the Chrome DevTools Protocol. Chrome on the sink must expose a loopback debug endpoint. A persistent context syncer keeps the latest accepted Cookie set in memory and injects it into every new browser context, so agent-browser, browserUse, Puppeteer, and Playwright sessions created after the last network push still inherit the session immediately.
+
+### One source, multiple sinks
+
+Use a `targets` map when one daily browser is authoritative for several agent machines:
+
+```yaml
+targets:
+  grok-bot:
+    url: http://grok-bot:9999/sync
+    peer: grok-bot
+  mini:
+    url: http://mini:9999/sync
+    peer: mini
+    policy: allowlist
+    domains:
+      - pattern: "tailscale.com"
+      - pattern: "%.tailscale.com"
+browser:
+  name: dia
+  profile: Default
+```
+
+Pair each peer once. `agentcookie source --once` pushes to every enabled target; `agentcookie source --once --target mini` narrows one run. Existing single `sink` + `peer` configs remain supported, but cannot be mixed with `targets`. A target-level `policy`/`domains` filter narrows its envelope before encryption, and the sink independently filters again. Set `AGENTCOOKIE_COOKIES_ONLY=1` for browser-only fan-out: it excludes Local Storage, IndexedDB, and the secrets bus from every source envelope.
 
 ## Install
 
@@ -286,7 +309,11 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 - Mac to Linux continuous sync via Tailscale `/sync`
 - Mac to Mac continuous sync (second Mac, Mac mini)
-- Live CDP injection on Linux (cookies go into Chrome's in-memory store)
+- One macOS source can fan out to multiple independently paired sinks; `--target` selects a subset for one run
+- Dia, Chrome, Brave, Edge, and Arc source-browser adapters on macOS
+- Live CDP injection on Linux and macOS (cookies go into Chrome's in-memory store)
+- Persistent CDP context sync for agent-browser/browserUse contexts created after the last push
+- `live_cdp_only` sinks that do not write cookie or secrets files
 - Three cookie delivery surfaces on macOS sink (Chrome SQLite, plaintext sidecar, per-CLI adapters)
 - Extra Chrome profile discovery: Mac profiles (Profile 1, Profile 2, etc.) are auto-discovered and decrypted; extra-profile cookies flow to sidecar, adapters, and live CDP alongside Default profile cookies
 - Sink adapters union extra-profile cookies through the same blocklist policy
@@ -298,7 +325,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 - Linux sink writes 0 cookies to Chrome SQLite (expected; success is live CDP inject)
 - Omitted cookie policy on Linux ships nothing (explicit `policy: blocklist` required for sync-all)
 - CDP port is loopback-only; same-user processes can attach and read injected cookies
-- Sidecar at `~/.agentcookie/cookies-plain.db` is plaintext at rest (not a success metric; verify with live CDP)
+- Sidecar at `~/.agentcookie/cookies-plain.db` is plaintext at rest unless sealing is enabled; `live_cdp_only` avoids creating it
 - Google/DBSC cookies need local sign-in on the sink; copied cookies expire in minutes
 - Linux extra-profile Chrome SQLite stays unread (no libsecret); discovery and doctor/status name stores, but decryption requires macOS Keychain
 - No live key rotation yet; re-run wizard on both sides to rotate
@@ -306,7 +333,6 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Not yet
 
-- One source to many sinks fan-out
 - Python reader library for the secrets bus
 - Signature verification on adoption manifests
 

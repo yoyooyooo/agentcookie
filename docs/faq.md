@@ -10,9 +10,9 @@ You can certainly stack agentcookie with an extension if you want; they don't fi
 
 Because the alternative is a hosted relay, which is a third-party data plane for highly sensitive material (session cookies), and that bar is too high for a v0.1 personal-use tool. Tailscale gives end-to-end WireGuard between your devices with zero infrastructure on your part. agentcookie layers its own AEAD on top so the wire format would survive a transport swap (raw SSH, Cloudflare Tunnel, S3-as-bus); Tailscale is the v0.1 default because it works for almost everyone in the target audience already.
 
-## Why doesn't agentcookie sync Firefox / Safari / Arc / Brave / Edge?
+## Which source browsers are supported?
 
-Firefox and Safari have different cookie stores entirely; supporting them is real work and would split test surface, so v0.1 stays Chrome stable on macOS. Chromium-derived browsers (Arc, Brave, Edge, Vivaldi) share the cookie format with Chrome and are easy follow-ups - file an issue and they likely land in v0.2.
+Chrome, Brave, Edge, Arc, and Dia are supported as macOS Chromium-family sources. Configure `browser.name` and `browser.profile` in `source.yaml`; Dia uses `~/Library/Application Support/Dia/User Data/<Profile>/Cookies` and the `Dia Safe Storage` Keychain item. Firefox and Safari use different stores and remain unsupported. Atlas is discoverable but its data-protection Keychain model prevents this path-based adapter from decrypting cookies.
 
 ## What about Linux sinks?
 
@@ -21,6 +21,8 @@ Firefox and Safari have different cookie stores entirely; supporting them is rea
 The sink receives the AES-GCM-sealed envelope over Tailscale, decrypts with the pairing-derived key, filters by the sink's policy, and injects via CDP's `Storage.setCookies` into every browser context. The target Chrome must be running with `--remote-debugging-port` (default 9223). This is the Grok Bot / agent-runtime path: the Linux box wakes up logged into your sites without a second login.
 
 **Tailscale required**: The Linux sink MUST bind a Tailscale 100.x address. It will refuse to start without a working tailnet connection. Run `tailscale status` to verify connectivity. Plaintext cookie JSON file transfers are NOT the supported Linux path - the tailnet (pairing + AES-GCM envelope + 100.x bind) is the trust boundary.
+
+**Browser-only sinks**: Set `live_cdp_only: true` together with `live_cdp.enabled: true` when the destination exists only to feed agent-browser or another CDP client. The sink keeps the latest allowed Cookie set in memory, injects existing and newly created browser contexts, and does not write Chrome SQLite, the sidecar, CLI adapter files, or secrets-bus files.
 
 **Security**: Missing policy on Linux defaults to allowlist-empty (ship nothing). For a single-operator trusted box (like your own Grok Bot VM), write `blocklist.yaml` with `policy: blocklist` and `domains: []` to sync all cookies:
 
@@ -53,7 +55,9 @@ See [docs/threat-model.md](threat-model.md) for the full treatment.
 
 ## Can I use one source with multiple sinks?
 
-Not in v0.1. One-to-many fan-out is a planned v0.2 feature. The protocol envelope is shaped so the sink doesn't need to know about other sinks, but the source-side state and config are single-peer today.
+Yes. Configure a named `targets` map in `source.yaml`, pair each peer independently, and run `agentcookie source --once` or `--watch` to push to every enabled target. Use `--target mini` (repeatable or comma-separated) to narrow one invocation. Existing single `sink` + `peer` configs remain supported but cannot be mixed with `targets`.
+
+The source reads and decrypts the browser once per cycle, applies the global source policy as an authorization ceiling, then applies each target's optional `policy`/`domains` filter before independently sealing that target's envelope. Every sink filters again. Compromising one sink or paired key does not reveal another sink's transport key or cookies excluded from the compromised target's policy.
 
 ## What's in the keystore on disk?
 

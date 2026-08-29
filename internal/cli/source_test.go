@@ -200,6 +200,66 @@ domains:
 	}
 }
 
+func TestSourcePushFanoutSealsPerTargetAfterOnePreparation(t *testing.T) {
+	fx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".tailscale.com", Name: "session", Value: "value", Path: "/"},
+		{HostKey: ".example.com", Name: "other", Value: "value", Path: "/"},
+	})
+	capture := newSourceCaptureForHosts(t, map[string]string{
+		"mini.test":  "mini-target-secret",
+		"other.test": "other-target-secret",
+	})
+	http.DefaultTransport = capture
+
+	blocklist := &config.Blocklist{Version: 1}
+	miniPolicy := &config.Blocklist{
+		Version: 1,
+		Policy:  config.CookiePolicyAllowlist,
+		Domains: []config.BlocklistEntry{{Pattern: "%.tailscale.com"}},
+	}
+	n, _, err := pushOnce(context.Background(), fx.cfg, blocklist, fx.key, []sourcePushTarget{
+		{Name: "mini", URL: "http://mini.test/sync", Secret: "mini-target-secret", Policy: miniPolicy},
+		{Name: "other", URL: "http://other.test/sync", Secret: "other-target-secret"},
+	}, false, false, false)
+	if err != nil {
+		t.Fatalf("fanout push: %v", err)
+	}
+	if n != 2 || capture.batchCount() != 2 {
+		t.Fatalf("fanout result cookies=%d batches=%d", n, capture.batchCount())
+	}
+	if got := hostsFromChromeCookies(capture.batchAt(0)); !reflect.DeepEqual(got, []string{".tailscale.com"}) {
+		t.Fatalf("mini target hosts=%v", got)
+	}
+	if got := hostsFromChromeCookies(capture.batchAt(1)); !reflect.DeepEqual(got, []string{".example.com", ".tailscale.com"}) {
+		t.Fatalf("other target hosts=%v", got)
+	}
+}
+
+func TestCookiesOnlyDoesNotReadOrShipSecretsBus(t *testing.T) {
+	fx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".tailscale.com", Name: "session", Value: "value", Path: "/"},
+	})
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	secretDir := filepath.Join(home, ".agentcookie", "secrets", "demo-cli")
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatalf("mkdir secrets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "secrets.env"), []byte("TOKEN=must-not-ship\n"), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+	t.Setenv("AGENTCOOKIE_COOKIES_ONLY", "1")
+
+	if _, err := fx.push(); err != nil {
+		t.Fatalf("cookies-only push: %v", err)
+	}
+	if got := fx.capture.secretsCountAt(0); got != 0 {
+		t.Fatalf("cookies-only envelope shipped %d secrets CLIs", got)
+	}
+}
+
 type sourcePushFixture struct {
 	configDir string
 	cfg       *config.SourceConfig
@@ -242,7 +302,7 @@ func newSourcePushFixture(t *testing.T, cookies []chrome.Cookie) *sourcePushFixt
 }
 
 func (f *sourcePushFixture) push() (int, error) {
-	return pushWithFreshBlocklist(context.Background(), f.cfg, f.key, f.secret, false, false, false, f.srcState, nil)
+	return pushWithFreshBlocklist(context.Background(), f.cfg, f.key, []sourcePushTarget{{Name: "legacy", URL: f.cfg.Sink.URL, Secret: f.secret}}, false, false, false, f.srcState, nil)
 }
 
 func (f *sourcePushFixture) batchCount() int {
@@ -254,14 +314,21 @@ func (f *sourcePushFixture) hostsAt(i int) []string {
 }
 
 type sourceCapture struct {
-	secret  string
-	mu      sync.Mutex
-	batches [][]chrome.Cookie
+	secret        string
+	secretsByHost map[string]string
+	mu            sync.Mutex
+	batches       [][]chrome.Cookie
+	secretsCounts []int
 }
 
 func newSourceCapture(t *testing.T, secret string) *sourceCapture {
 	t.Helper()
 	return &sourceCapture{secret: secret}
+}
+
+func newSourceCaptureForHosts(t *testing.T, secrets map[string]string) *sourceCapture {
+	t.Helper()
+	return &sourceCapture{secretsByHost: secrets}
 }
 
 func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -272,7 +339,11 @@ func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	plaintext, err := transport.OpenWithSecret(sealed, c.secret)
+	secret := c.secret
+	if c.secretsByHost != nil {
+		secret = c.secretsByHost[req.URL.Host]
+	}
+	plaintext, err := transport.OpenWithSecret(sealed, secret)
 	if err != nil {
 		return nil, fmt.Errorf("open payload: %w", err)
 	}
@@ -282,6 +353,7 @@ func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	c.mu.Lock()
 	c.batches = append(c.batches, append([]chrome.Cookie(nil), envelope.Cookies...))
+	c.secretsCounts = append(c.secretsCounts, len(envelope.Secrets))
 	c.mu.Unlock()
 
 	return &http.Response{
@@ -303,6 +375,12 @@ func (c *sourceCapture) batchAt(i int) []chrome.Cookie {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]chrome.Cookie(nil), c.batches[i]...)
+}
+
+func (c *sourceCapture) secretsCountAt(i int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.secretsCounts[i]
 }
 
 func seedSourceCookiesDB(t *testing.T, path string, cookies []chrome.Cookie, key []byte) {

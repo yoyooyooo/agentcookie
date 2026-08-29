@@ -1,12 +1,12 @@
 ---
 name: agentcookie-install
-description: Install agentcookie on a Mac source and a Linux or Mac sink so Chrome cookies sync continuously over Tailscale. Use when the user says "install agentcookie", "set up cookie sync", "share my Chrome sessions with my agent box", or "make my agent log in as me".
+description: Install agentcookie on one authoritative Mac source and one or more Linux or Mac sinks so Chromium-family cookies sync continuously over Tailscale. Use when the user says "install agentcookie", "set up cookie sync", "share my browser sessions with my agent boxes", or "make my agents log in as me".
 version: 1.0.0
 ---
 
 # agentcookie install
 
-You are helping the user install agentcookie on two machines that are both on the same Tailscale tailnet, then pair them, so that the sink's Chrome stays continuously in sync with the source's Chrome.
+You are helping the user install agentcookie on machines in one Tailscale tailnet. One macOS Chromium-family browser is the authoritative source; each sink has an independent pairing key, cookie policy, and local CDP endpoint. After install, the source can continuously fan out to all enabled sinks or target one by name.
 
 After install, the user does not touch agentcookie again. The source watches Chrome via fsnotify and pushes every cookie change to the sink within seconds. On Linux, the sink injects cookies via CDP into an already-running Chrome. On macOS, a LaunchAgent keeps the daemon running across reboots.
 
@@ -220,6 +220,12 @@ agentcookie wizard install --as sink \
 
 The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and per-CLI adapter session files.
 
+## Multiple sinks
+
+For more than one sink, replace legacy `sink` + `peer` in source.yaml with a named `targets` map. Pair every target independently, then use `source --once`/`--watch` for all enabled targets or `--target <name>` for a subset. Never copy one target's paired-key file to another target.
+
+For agent-browser/Fortress destinations, configure the sink with `live_cdp_only: true`, `live_cdp.enabled: true`, and the local persistent browser's CDP endpoint. Use allowlist mode on both source and sink. The sink context syncer injects contexts created after the latest network push; no sidecar or secrets files are materialized.
+
 ## What to do if something errors
 
 **`agentcookie: command not found`**: The binary is not on `$PATH`. Either use the full path (`/usr/local/bin/agentcookie`) or add the bin directory to PATH.
@@ -234,6 +240,5 @@ The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and p
 
 ## Out of scope for this skill
 
-- Changing the cookie policy or allowlist/blocklist rules (the user edits `~/.config/agentcookie/blocklist.yaml` directly)
-- Rotating pairing keys (re-run wizard on both sides)
-- One source to many sinks (not yet supported)
+- Changing the cookie policy without explicit user authorization
+- Rotating pairing keys without re-pairing each affected target

@@ -1,31 +1,45 @@
 # Example source.yaml. Copy to ~/.config/agentcookie/source.yaml on the
 # machine where you log in interactively (your laptop).
 
-sink:
-  # URL of the sink machine's /sync endpoint over your tailnet.
-  url: http://my-mac-mini.tailnet.ts.net:9999/sync
+# Fan-out targets are independently paired. The map key is the name accepted by
+# `agentcookie source --target <name>`; omitting --target pushes to every enabled
+# target. Use short MagicDNS machine names so Tailnet DNS suffix changes do not
+# require config edits.
+targets:
+  grok-bot:
+    url: http://grok-bot:9999/sync
+    peer: grok-bot
+  mini:
+    url: http://mini:9999/sync
+    peer: mini
+    # Optional source-side least-privilege filter for this target. The sink
+    # applies its own policy again after decrypting the envelope.
+    policy: allowlist
+    domains:
+      - pattern: "tailscale.com"
+      - pattern: "%.tailscale.com"
+  # parked-agent:
+  #   url: http://parked-agent:9999/sync
+  #   peer: parked-agent
+  #   disabled: true
 
-chrome:
-  # Defaults to ~/Library/Application Support/Google/Chrome/Default/Cookies
-  # if omitted. Set explicitly to read from a non-default profile.
-  db_path: ~/Library/Application Support/Google/Chrome/Default/Cookies
+# Optional source browser adapter. Omit for Google Chrome. Supported: chrome,
+# brave, edge, arc, dia. Atlas is recognized but its cookies cannot be decrypted
+# through the path-based adapter; `agentcookie doctor` reports that boundary.
+browser:
+  name: dia
+  profile: Default
 
-# Optional source browser adapter. Omit for Google Chrome. Set name/profile
-# when reading cookies from another Chromium-family source browser.
-# Supported: chrome, brave, edge, arc, dia. (atlas is recognized but cannot be
-# decrypted by a third-party tool -- see issue #80; `agentcookie doctor`
-# reports the gap.)
-# browser:
-#   name: brave # chrome | brave | edge | arc
-#   profile: Default
+# An explicit path overrides the browser/profile-derived Cookies path.
+# chrome:
+#   db_path: ~/Library/Application Support/Dia/User Data/Default/Cookies
 
-peer:
-  # Hostname of the sink machine. After `agentcookie pair --as source`
-  # finishes, this is the filename under ~/.config/agentcookie/keys/.
-  # The derived 32-byte key found there is used for transport AES-GCM.
-  hostname: my-mac-mini.tailnet.ts.net
+# Legacy single-target source.yaml files remain supported. Use `sink` + `peer`
+# instead of `targets`, never both:
+# sink:
+#   url: http://my-mac-mini:9999/sync
+# peer:
+#   hostname: my-mac-mini
 
-# Legacy security.shared_secret is still accepted as a fallback for users
-# who haven't paired yet. After pairing, delete the field below entirely.
-# security:
-#   shared_secret: only-set-this-before-you-pair
+# Legacy security.shared_secret remains accepted only for the legacy single
+# target. Fan-out targets require one pairing-derived key per peer.

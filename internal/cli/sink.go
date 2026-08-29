@@ -91,6 +91,8 @@ func runSink(cmd *cobra.Command, args []string) error {
 	switch {
 	case sinkDryRun:
 		fmt.Fprintln(os.Stderr, "agentcookie sink: --dry-run set; skipping Chrome Safe Storage and all write paths")
+	case cfg.LiveCDPOnly:
+		fmt.Fprintln(os.Stderr, "agentcookie sink: live_cdp_only set; cookies stay in browser memory and no cookie or secrets files are written")
 	case cfg.SkipChromeSQLite:
 		fmt.Fprintln(os.Stderr, "agentcookie sink: skip_chrome_sqlite set; sidecar + adapter push only (no Chrome Safe Storage read, no Chrome SQLite write)")
 	default:
@@ -149,8 +151,18 @@ func runSink(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "agentcookie sink: cmux delivery surface enabled")
 	}
 
+	var liveStore *liveCookieStore
+	if cfg.LiveCDP.Enabled && !sinkDryRun {
+		liveStore = &liveCookieStore{}
+		endpoint := cfg.LiveCDP.Endpoint
+		if endpoint == "" {
+			endpoint = livecdp.DefaultCDPEndpoint
+		}
+		go superviseLiveCDPSyncer(cmd.Context(), endpoint, liveStore)
+	}
+
 	var stateMu sync.Mutex
-	mux := newSinkMux(cfg, transportSecret, key, seqTracker, stateWriter, sinkState, &stateMu)
+	mux := newSinkMux(cfg, transportSecret, key, seqTracker, stateWriter, sinkState, &stateMu, liveStore)
 
 	srv := httpserver.Configure(&http.Server{Addr: cfg.Listen.Addr, Handler: mux}, httpserver.SinkSync)
 	if sinkDryRun {
@@ -159,6 +171,59 @@ func runSink(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "agentcookie sink: listening on http://%s (db=%s)\n", cfg.Listen.Addr, cfg.Chrome.DBPath)
 	}
 	return srv.ListenAndServe()
+}
+
+type liveCookieStore struct {
+	mu      sync.RWMutex
+	cookies []chrome.Cookie
+}
+
+func (s *liveCookieStore) Set(cookies []chrome.Cookie) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cookies = append(s.cookies[:0], cookies...)
+}
+
+func (s *liveCookieStore) Get() ([]chrome.Cookie, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]chrome.Cookie(nil), s.cookies...), nil
+}
+
+// superviseLiveCDPSyncer keeps the context watcher attached across browser
+// restarts. The sink's ordinary per-POST injection remains the immediate path;
+// this loop owns contexts that agent-browser creates after the last POST.
+func superviseLiveCDPSyncer(ctx context.Context, endpoint string, store *liveCookieStore) {
+	const retryDelay = 5 * time.Second
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		syncer, cleanup, err := livecdp.AttachSyncer(ctx, endpoint, store.Get, func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP context sync attach failed: %v\n", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryDelay):
+				continue
+			}
+		}
+		fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP context sync attached to %s\n", endpoint)
+		err = syncer.Run(ctx)
+		cleanup()
+		if ctx.Err() != nil {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "agentcookie sink: live CDP context sync disconnected: %v; retrying\n", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryDelay):
+		}
+	}
 }
 
 func logSinkStartupBlocklistStatus() {
@@ -186,6 +251,7 @@ func newSinkMux(
 	stateWriter *state.Writer,
 	sinkState *state.SinkState,
 	stateMu *sync.Mutex,
+	liveStore *liveCookieStore,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +301,9 @@ func newSinkMux(
 		cookies := envelope.Cookies
 		var droppedHosts map[string]int
 		cookies, droppedHosts = blockMatcher.Filter(cookies)
+		if liveStore != nil && !sinkDryRun {
+			liveStore.Set(cookies)
+		}
 
 		dropped := 0
 		for _, n := range droppedHosts {
@@ -269,7 +338,11 @@ func newSinkMux(
 			writeMode string
 			writeErr  error
 		)
-		if cfg.SkipChromeSQLite {
+		if cfg.LiveCDPOnly {
+			// The persistent browser context is the sole materialization target.
+			// liveStore plus the Syncer handles contexts created after this POST.
+			writeMode = "live-cdp-only"
+		} else if cfg.SkipChromeSQLite {
 			// v0.12.0-beta.3: headless-sink path. Sidecar only; no Chrome
 			// SQLite/leveldb/indexeddb writes. Friend's Chrome app on
 			// the sink does not see synced cookies through this path
@@ -352,7 +425,10 @@ func newSinkMux(
 		if cfg.CDP.ProfileDir != "" {
 			profileDir = cfg.CDP.ProfileDir
 		}
-		unionedCookies := unionCookiesWithExtraProfiles(cookies, profileDir, blockMatcher)
+		var unionedCookies []chrome.Cookie
+		if !cfg.LiveCDPOnly {
+			unionedCookies = unionCookiesWithExtraProfiles(cookies, profileDir, blockMatcher)
+		}
 		if len(unionedCookies) > 0 {
 			adapterResults = sinkpush.RunAll(unionedCookies)
 			logAdapterResults(adapterResults)
@@ -364,7 +440,7 @@ func newSinkMux(
 		// key is present AND v0.12's sealing posture is on; the sealed
 		// twin appears alongside the plaintext. R12 regression guard:
 		// when envelope.Secrets is empty/nil this branch is a no-op.
-		if len(envelope.Secrets) > 0 {
+		if !cfg.LiveCDPOnly && len(envelope.Secrets) > 0 {
 			home, _ := os.UserHomeDir()
 			sealingEnabled := keystore.MasterKeyExists()
 			secResult, secErrs := secretsbus.WritePayload(home, envelope.Secrets, sealingEnabled)

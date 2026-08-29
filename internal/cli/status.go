@@ -105,7 +105,15 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("agentcookie %s\n", st.Version)
 		fmt.Printf("config dir: %s\n", st.ConfigDir)
 		if st.SourceConfig != nil {
-			fmt.Printf("  source -> %s\n", st.SourceConfig.Sink.URL)
+			if len(st.SourceConfig.Targets) > 0 {
+				targets, _ := st.SourceConfig.SelectSourceTargets(nil)
+				fmt.Printf("  source -> %d enabled targets\n", len(targets))
+				for _, target := range targets {
+					fmt.Printf("    - %s: %s (peer=%s)\n", target.Name, target.URL, target.Peer)
+				}
+			} else {
+				fmt.Printf("  source -> %s\n", st.SourceConfig.Sink.URL)
+			}
 			fmt.Printf("    chrome db: %s\n", st.SourceConfig.Chrome.DBPath)
 		} else {
 			fmt.Println("  source: not configured")

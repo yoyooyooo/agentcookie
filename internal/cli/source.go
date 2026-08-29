@@ -31,7 +31,15 @@ var (
 	sourceVerbose  bool
 	sourceDryRun   bool
 	sourceSkipDBSC bool
+	sourceTargets  []string
 )
+
+type sourcePushTarget struct {
+	Name   string
+	URL    string
+	Secret string
+	Policy *config.Blocklist
+}
 
 // dbscSummary carries the DBSC-suspect tally from one push back to the caller
 // so it can be recorded in SourceState for `doctor` / `status`.
@@ -64,6 +72,7 @@ func init() {
 	sourceCmd.Flags().BoolVar(&sourceVerbose, "verbose", false, "log per-pattern decisions to stderr")
 	sourceCmd.Flags().BoolVar(&sourceDryRun, "dry-run", false, "read + filter but do not contact the sink")
 	sourceCmd.Flags().BoolVar(&sourceSkipDBSC, "skip-dbsc-suspect", false, "drop cookies that look device-bound (DBSC) instead of shipping them with a warning; also honored via AGENTCOOKIE_SKIP_DBSC_SUSPECT=1")
+	sourceCmd.Flags().StringSliceVar(&sourceTargets, "target", nil, "push only to named target(s) from source.yaml targets (repeat or comma-separate)")
 }
 
 func runSource(cmd *cobra.Command, args []string) error {
@@ -99,22 +108,34 @@ func runSource(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	secret, err := resolveTransportSecret(common.ConfigDir, cfg.Peer.Hostname, cfg.Security.SharedSecret)
+	configuredTargets, err := cfg.SelectSourceTargets(sourceTargets)
 	if err != nil {
 		return err
+	}
+	pushTargets := make([]sourcePushTarget, 0, len(configuredTargets))
+	for _, target := range configuredTargets {
+		legacySecret := ""
+		if target.Name == "legacy" {
+			legacySecret = cfg.Security.SharedSecret
+		}
+		secret, err := resolveTransportSecret(common.ConfigDir, target.Peer, legacySecret)
+		if err != nil {
+			return fmt.Errorf("target %s: %w", target.Name, err)
+		}
+		pushTargets = append(pushTargets, sourcePushTarget{Name: target.Name, URL: target.URL, Secret: secret, Policy: target.Policy})
 	}
 
 	// State writer for `agentcookie status` to read.
 	home, _ := os.UserHomeDir()
 	stateWriter := state.NewWriter(state.SourcePath(home))
-	srcState := &state.SourceState{Role: "source", SinkURL: cfg.Sink.URL}
+	srcState := &state.SourceState{Role: "source", SinkURL: fmt.Sprintf("%d target(s)", len(pushTargets))}
 
 	// --skip-dbsc-suspect is also honored via env var so a LaunchAgent can
 	// opt in without a flag edit.
 	skipDBSC := sourceSkipDBSC || os.Getenv("AGENTCOOKIE_SKIP_DBSC_SUSPECT") == "1"
 
 	push := func(ctx context.Context) (int, error) {
-		return pushWithFreshBlocklist(ctx, cfg, key, secret, sourceDryRun, sourceVerbose, skipDBSC, srcState, stateWriter)
+		return pushWithFreshBlocklist(ctx, cfg, key, pushTargets, sourceDryRun, sourceVerbose, skipDBSC, srcState, stateWriter)
 	}
 
 	if sourceOnce {
@@ -146,7 +167,11 @@ func runSource(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("init watcher: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "agentcookie source --watch: adapter=%s watching %s, sink=%s\n", sourceBrowser.Name, cfg.Chrome.DBPath, cfg.Sink.URL)
+	targetNames := make([]string, 0, len(pushTargets))
+	for _, target := range pushTargets {
+		targetNames = append(targetNames, target.Name)
+	}
+	fmt.Fprintf(os.Stderr, "agentcookie source --watch: adapter=%s watching %s, targets=%v\n", sourceBrowser.Name, cfg.Chrome.DBPath, targetNames)
 
 	// v0.13: also watch ~/.agentcookie/secrets/ so a write to a per-CLI
 	// secrets.env triggers the same push pipeline as a Chrome cookie
@@ -189,7 +214,7 @@ func pushWithFreshBlocklist(
 	ctx context.Context,
 	cfg *config.SourceConfig,
 	key []byte,
-	secret string,
+	targets []sourcePushTarget,
 	dryRun bool,
 	verbose bool,
 	skipDBSC bool,
@@ -202,7 +227,7 @@ func pushWithFreshBlocklist(
 		recordSourcePushResult(srcState, stateWriter, 0, dbsc, err)
 		return 0, err
 	}
-	n, dbsc, err := pushOnce(ctx, cfg, blocklist, key, secret, dryRun, verbose, skipDBSC)
+	n, dbsc, err := pushOnce(ctx, cfg, blocklist, key, targets, dryRun, verbose, skipDBSC)
 	recordSourcePushResult(srcState, stateWriter, n, dbsc, err)
 	return n, err
 }
@@ -245,7 +270,7 @@ func pushOnce(
 	cfg *config.SourceConfig,
 	blocklist *config.Blocklist,
 	key []byte,
-	secret string,
+	targets []sourcePushTarget,
 	dryRun bool,
 	verbose bool,
 	skipDBSC bool,
@@ -286,12 +311,19 @@ func pushOnce(
 		}
 	}
 
-	// v0.14: combined v1 bus + v2 discovery. LoadPayloadWithDiscovery
-	// runs v1 LoadPayload AND v2 Discover, reads each discovered project's
-	// [secrets.file] in place, applies sync policy, and merges. v1 bus
-	// wins per-key over v2 read-in-place per spec section 10.3.
+	cookiesOnly := os.Getenv("AGENTCOOKIE_COOKIES_ONLY") == "1"
+
+	// v0.14: combined v1 bus + v2 discovery. A cookies-only source must not
+	// even read the secrets bus; it is a capability boundary, not just a
+	// smaller wire payload.
 	home, _ := os.UserHomeDir()
-	secretsPayload, secretsErrs := secretsbus.LoadPayloadWithDiscovery(home)
+	var secretsPayload *secretsbus.Payload
+	var secretsErrs []error
+	if cookiesOnly {
+		fmt.Fprintln(os.Stderr, "agentcookie source: AGENTCOOKIE_COOKIES_ONLY=1; skipping secrets bus")
+	} else {
+		secretsPayload, secretsErrs = secretsbus.LoadPayloadWithDiscovery(home)
+	}
 	for _, e := range secretsErrs {
 		fmt.Fprintf(os.Stderr, "agentcookie source: secrets-bus: %v\n", e)
 	}
@@ -313,7 +345,7 @@ func pushOnce(
 		"cookies_dbsc_skipped": dbsc.skipped,
 		"secrets_clis":         secretsCLICount,
 		"dry_run":              dryRun,
-		"sink_url":             cfg.Sink.URL,
+		"target_count":         len(targets),
 		"posted":               false,
 	}
 
@@ -338,7 +370,6 @@ func pushOnce(
 	var lsTarball []byte
 	var idbTarball []byte
 	var idbSkipped []string
-	cookiesOnly := os.Getenv("AGENTCOOKIE_COOKIES_ONLY") == "1"
 	// IndexedDB is opt-in (typical dirs are 400MB+). Local Storage is packed
 	// by default, but a busy Dia/Chrome profile can still be tens of MB and
 	// blow the Tailscale POST. AGENTCOOKIE_COOKIES_ONLY=1 skips both.
@@ -359,54 +390,88 @@ func pushOnce(
 		}
 	}
 
-	envelope := protocol.SyncEnvelope{
-		ProtocolVersion:     protocol.Version,
-		SourceHostname:      pairing.LocalHostname(),
-		Sequence:            time.Now().UnixNano(),
-		Cookies:             all,
-		LocalStorageTarball: lsTarball,
-		IndexedDBTarball:    idbTarball,
-		IndexedDBSkipped:    idbSkipped,
-	}
-	if secretsPayload != nil && len(secretsPayload.CLIs) > 0 {
-		envelope.Secrets = secretsPayload.CLIs
-	}
-	payload, err := json.Marshal(envelope)
-	if err != nil {
-		return 0, dbsc, fmt.Errorf("marshal envelope: %w", err)
-	}
-	sealed, err := transport.SealWithSecret(payload, secret)
-	if err != nil {
-		return 0, dbsc, fmt.Errorf("seal payload: %w", err)
+	targetResults := make(map[string]any, len(targets))
+	var targetErrs []error
+	succeeded := 0
+	for _, target := range targets {
+		targetCookies := all
+		targetDropped := 0
+		if target.Policy != nil {
+			matcher := protocol.NewBlocklistMatcher(target.Policy)
+			var dropped map[string]int
+			targetCookies, dropped = matcher.Filter(all)
+			for _, count := range dropped {
+				targetDropped += count
+			}
+		}
+		envelope := protocol.SyncEnvelope{
+			ProtocolVersion:     protocol.Version,
+			SourceHostname:      pairing.LocalHostname(),
+			Sequence:            time.Now().UnixNano(),
+			Cookies:             targetCookies,
+			LocalStorageTarball: lsTarball,
+			IndexedDBTarball:    idbTarball,
+			IndexedDBSkipped:    idbSkipped,
+		}
+		if secretsPayload != nil && len(secretsPayload.CLIs) > 0 {
+			envelope.Secrets = secretsPayload.CLIs
+		}
+		payload, err := json.Marshal(envelope)
+		if err != nil {
+			targetErrs = append(targetErrs, fmt.Errorf("target %s: marshal envelope: %w", target.Name, err))
+			continue
+		}
+		sealed, err := transport.SealWithSecret(payload, target.Secret)
+		if err != nil {
+			targetErrs = append(targetErrs, fmt.Errorf("target %s: seal payload: %w", target.Name, err))
+			continue
+		}
+
+		// Each target gets an independent timeout and result. A slow or down
+		// sink cannot prevent the remaining configured targets from being tried.
+		postCtx, cancel := context.WithTimeout(ctx, httpserver.Defaults(httpserver.SyncClient).ClientTimeout)
+		req, err := http.NewRequestWithContext(postCtx, "POST", target.URL, bytes.NewReader(sealed))
+		if err != nil {
+			cancel()
+			targetErrs = append(targetErrs, fmt.Errorf("target %s: new request: %w", target.Name, err))
+			continue
+		}
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp, err := httpserver.Client(httpserver.SyncClient).Do(req)
+		if err != nil {
+			cancel()
+			targetErrs = append(targetErrs, fmt.Errorf("target %s: POST %s: %w", target.Name, target.URL, err))
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		cancel()
+		targetResults[target.Name] = map[string]any{
+			"url":             target.URL,
+			"status":          resp.StatusCode,
+			"response":        string(body),
+			"cookies":         len(targetCookies),
+			"cookies_dropped": targetDropped,
+		}
+		if resp.StatusCode != http.StatusOK {
+			targetErrs = append(targetErrs, fmt.Errorf("target %s returned %d: %s", target.Name, resp.StatusCode, string(body)))
+			continue
+		}
+		succeeded++
+		if !common.JSON {
+			fmt.Fprintf(os.Stderr, "agentcookie source: target=%s posted %d cookies (target policy dropped %d), sink replied: %s%s\n", target.Name, len(targetCookies), targetDropped, string(body), dbscNote(dbsc))
+		}
 	}
 
-	// Bound the POST by the SyncClient profile's timeout (5 minutes
-	// in v0.12) so a heavy LocalStorage / IndexedDB payload over a
-	// slow tailnet link does not get cut off at the pre-v0.12 30s
-	// floor. The Client.Timeout itself still applies; context.Done
-	// is just the cooperative path that gives the handler a clean
-	// cancellation.
-	postCtx, cancel := context.WithTimeout(ctx, httpserver.Defaults(httpserver.SyncClient).ClientTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(postCtx, "POST", cfg.Sink.URL, bytes.NewReader(sealed))
-	if err != nil {
-		return 0, dbsc, fmt.Errorf("new request: %w", err)
+	result["targets"] = targetResults
+	result["targets_succeeded"] = succeeded
+	result["posted"] = succeeded == len(targets)
+	if common.JSON {
+		_ = emit(result, "")
 	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	resp, err := httpserver.Client(httpserver.SyncClient).Do(req)
-	if err != nil {
-		return 0, dbsc, fmt.Errorf("POST to sink %s: %w", cfg.Sink.URL, err)
+	if len(targetErrs) > 0 {
+		return 0, dbsc, errors.Join(targetErrs...)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	result["posted"] = resp.StatusCode == http.StatusOK
-	result["sink_response"] = string(body)
-	result["sink_status"] = resp.StatusCode
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, dbsc, fmt.Errorf("sink returned %d: %s", resp.StatusCode, string(body))
-	}
-	_ = emit(result, fmt.Sprintf("agentcookie source: posted %d cookies, sink replied: %s%s\n", len(all), string(body), dbscNote(dbsc)))
 	return len(all), dbsc, nil
 }
 

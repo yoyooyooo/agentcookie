@@ -167,8 +167,15 @@ func buildReport(d doctorDeps) DoctorReport {
 
 	// 4. Keystore: union of source/sink peer hostnames.
 	peers := []string{}
-	if srcCfg != nil && srcCfg.Peer.Hostname != "" {
-		peers = append(peers, srcCfg.Peer.Hostname)
+	if srcCfg != nil {
+		if srcCfg.Peer.Hostname != "" {
+			peers = append(peers, srcCfg.Peer.Hostname)
+		}
+		for _, target := range srcCfg.Targets {
+			if target.Peer != "" {
+				peers = append(peers, target.Peer)
+			}
+		}
 	}
 	if sinkCfg != nil && sinkCfg.Peer.Hostname != "" {
 		peers = append(peers, sinkCfg.Peer.Hostname)

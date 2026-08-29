@@ -467,6 +467,45 @@ func TestCDPInjector_FailureDoesNotPropagate(t *testing.T) {
 	}
 }
 
+func TestLiveCookieStoreReturnsIndependentSnapshots(t *testing.T) {
+	store := &liveCookieStore{}
+	original := []chrome.Cookie{{HostKey: ".tailscale.com", Name: "session", Value: "one"}}
+	store.Set(original)
+	original[0].Value = "mutated"
+
+	got, err := store.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got) != 1 || got[0].Value != "one" {
+		t.Fatalf("stored cookies = %+v", got)
+	}
+	got[0].Value = "changed-copy"
+	again, _ := store.Get()
+	if again[0].Value != "one" {
+		t.Fatalf("Get returned shared storage: %+v", again)
+	}
+}
+
+func TestSinkLiveCDPOnlyDoesNotWriteSidecar(t *testing.T) {
+	fx := newSinkHandlerFixtureWithMode(t, false, true)
+	rec := fx.postSync(1, []chrome.Cookie{{
+		HostKey: ".tailscale.com",
+		Name:    "session",
+		Value:   "must-stay-in-memory",
+		Path:    "/",
+	}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := fx.sidecarHostsOrEmpty(); len(got) != 0 {
+		t.Fatalf("live_cdp_only wrote sidecar hosts: %v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "0 sidecar") {
+		t.Fatalf("response does not report zero sidecar writes: %s", rec.Body.String())
+	}
+}
+
 type sinkHandlerFixture struct {
 	configDir  string
 	home       string
@@ -477,6 +516,10 @@ type sinkHandlerFixture struct {
 }
 
 func newSinkHandlerFixture(t *testing.T, dryRun bool) *sinkHandlerFixture {
+	return newSinkHandlerFixtureWithMode(t, dryRun, false)
+}
+
+func newSinkHandlerFixtureWithMode(t *testing.T, dryRun bool, liveCDPOnly bool) *sinkHandlerFixture {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -491,13 +534,14 @@ func newSinkHandlerFixture(t *testing.T, dryRun bool) *sinkHandlerFixture {
 	cfg := &config.SinkConfig{
 		Listen:           config.ListenRef{Addr: "127.0.0.1:9999"},
 		SkipChromeSQLite: true,
+		LiveCDPOnly:      liveCDPOnly,
 	}
 	secret := "sink-handler-test-secret"
 	seqTracker := protocol.NewSequenceTracker()
 	sinkState := &state.SinkState{Role: "sink", ListenAddr: cfg.Listen.Addr}
 	stateWriter := state.NewWriter(filepath.Join(t.TempDir(), "sink-state.json"))
 	var stateMu sync.Mutex
-	mux := newSinkMux(cfg, secret, []byte("0123456789abcdef"), seqTracker, stateWriter, sinkState, &stateMu)
+	mux := newSinkMux(cfg, secret, []byte("0123456789abcdef"), seqTracker, stateWriter, sinkState, &stateMu, nil)
 
 	return &sinkHandlerFixture{
 		configDir:  configDir,

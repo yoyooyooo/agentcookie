@@ -45,6 +45,14 @@ Download from [GitHub Releases](https://github.com/mvanhorn/agentcookie/releases
 
 ## [Unreleased]
 
+### Dia source fan-out for agent browsers
+
+- Added the Dia macOS source adapter (`Dia/User Data/<Profile>` with `Dia Safe Storage`).
+- Added named `targets` in `source.yaml`; every sink has its own URL, peer key, enable state, result, and `--target` selector. Legacy single `sink` + `peer` configs remain supported.
+- `AGENTCOOKIE_COOKIES_ONLY=1` now excludes Local Storage, IndexedDB, and the secrets bus rather than only shrinking browser storage payloads.
+- Added `live_cdp_only` sinks for agent-browser/Fortress: cookies stay in browser memory and no Chrome SQLite, sidecar, adapter, or secrets files are written.
+- The sink now keeps a CDP context syncer attached, so browser contexts created after the last source push receive the latest accepted cookies.
+
 ### Cookie allowlist policy
 
 `blocklist.yaml` now accepts an explicit `policy` field. Omitted policy and
