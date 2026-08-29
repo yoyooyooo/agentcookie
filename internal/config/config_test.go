@@ -123,7 +123,7 @@ func TestLoadSourceUnknownBrowserFailsWithSupportedNames(t *testing.T) {
 sink:
   url: http://example.test:9999/sync
 browser:
-  name: dia
+  name: safari
 security:
   shared_secret: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 `)

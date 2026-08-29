@@ -14,7 +14,7 @@ chrome:
 
 # Optional source browser adapter. Omit for Google Chrome. Set name/profile
 # when reading cookies from another Chromium-family source browser.
-# Supported: chrome, brave, edge, arc. (atlas is recognized but cannot be
+# Supported: chrome, brave, edge, arc, dia. (atlas is recognized but cannot be
 # decrypted by a third-party tool -- see issue #80; `agentcookie doctor`
 # reports the gap.)
 # browser:

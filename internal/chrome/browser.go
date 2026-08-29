@@ -97,6 +97,17 @@ var browserRegistry = map[string]Browser{
 		KeychainAccount: "Arc",
 		KeychainService: "Arc Safe Storage",
 	},
+	"dia": {
+		Name: "dia",
+		// Dia uses the same User Data layout as Arc:
+		// ~/Library/Application Support/Dia/User Data/<profile>/.
+		// Keychain account/service follow the standard macOS Safe Storage
+		// item (acct=Dia, svce=Dia Safe Storage). Cookie crypto is Chromium
+		// v10 with PBKDF2-HMAC-SHA1(saltysalt, 1003), same as Chrome on macOS.
+		SupportDir:      []string{"Dia", "User Data"},
+		KeychainAccount: "Dia",
+		KeychainService: "Dia Safe Storage",
+	},
 }
 
 // LookupBrowser returns the browser descriptor for name. Empty name defaults
