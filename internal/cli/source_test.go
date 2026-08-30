@@ -23,6 +23,7 @@ import (
 	"github.com/mvanhorn/agentcookie/internal/chrome"
 	"github.com/mvanhorn/agentcookie/internal/config"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
+	"github.com/mvanhorn/agentcookie/internal/realchrome"
 	"github.com/mvanhorn/agentcookie/internal/state"
 	"github.com/mvanhorn/agentcookie/internal/transport"
 	"github.com/mvanhorn/agentcookie/internal/tsclient"
@@ -296,6 +297,41 @@ func TestCookiesOnlyDoesNotShipSecretsBus(t *testing.T) {
 	}
 	if got := fx.capture.secretsCountAt(0); got != 0 {
 		t.Fatalf("cookies-only envelope shipped %d secrets CLIs", got)
+	}
+}
+
+func TestSourcePushInjectsConfiguredOrdinaryChromeAndRemoteTarget(t *testing.T) {
+	fx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".facebook.com", Name: "session", Value: "secret", Path: "/"},
+		{HostKey: ".example.com", Name: "other", Value: "secret", Path: "/"},
+	})
+	fx.cfg.RealChrome = config.RealChromeRef{
+		Enabled:      true,
+		AutoApprove:  true,
+		DomainFilter: []string{"%.facebook.com"},
+	}
+	var injected []chrome.Cookie
+	restore := SetRealChromeInjectorForTesting(func(_ context.Context, opts realchrome.Options, cookies []chrome.Cookie) (realchrome.Result, error) {
+		if !opts.AutoApprove {
+			t.Error("AutoApprove = false")
+		}
+		injected = append([]chrome.Cookie(nil), cookies...)
+		return realchrome.Result{Cookies: len(cookies), Port: 9222}, nil
+	})
+	defer restore()
+
+	n, err := fx.push()
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if n != 2 || fx.batchCount() != 1 {
+		t.Fatalf("cookies=%d batches=%d", n, fx.batchCount())
+	}
+	if got := hostsFromChromeCookies(injected); !reflect.DeepEqual(got, []string{".facebook.com"}) {
+		t.Fatalf("ordinary Chrome hosts = %v", got)
+	}
+	if got := fx.hostsAt(0); !reflect.DeepEqual(got, []string{".example.com", ".facebook.com"}) {
+		t.Fatalf("remote hosts = %v", got)
 	}
 }
 

@@ -54,10 +54,12 @@ type SinkState struct {
 	// surfaces this; `agentcookie wizard verify-adapters` reads it.
 	LastAdapterResults []AdapterResult `json:"last_adapter_results,omitempty"`
 
-	// LiveCDP tracks the Linux sink's live CDP injection path (attach to
-	// an already-running Chrome via --remote-debugging-port). Populated
-	// when live_cdp.enabled is true in sink.yaml.
+	// LiveCDP tracks injection into an externally managed automation Chrome.
 	LiveCDP *LiveCDPState `json:"live_cdp,omitempty"`
+
+	// RealChrome tracks injection into the user's ordinary Google Chrome
+	// Default profile through Chrome's own loopback DevTools endpoint.
+	RealChrome *RealChromeState `json:"real_chrome,omitempty"`
 }
 
 // LiveCDPState records the outcome of live CDP injection into an
@@ -71,6 +73,19 @@ type LiveCDPState struct {
 	LastError     string    `json:"last_error,omitempty"`
 	TotalInjects  int       `json:"total_injects"`
 	TotalFailures int       `json:"total_failures"`
+}
+
+// RealChromeState records ordinary Chrome delivery without exposing Cookie
+// values or the browser-level websocket token.
+type RealChromeState struct {
+	Enabled         bool      `json:"enabled"`
+	Port            int       `json:"port,omitempty"`
+	LastInjectAt    time.Time `json:"last_inject_at,omitempty"`
+	LastCookies     int       `json:"last_cookies,omitempty"`
+	ApprovalClicked bool      `json:"approval_clicked,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+	TotalInjects    int       `json:"total_injects"`
+	TotalFailures   int       `json:"total_failures"`
 }
 
 // AdapterResult is the per-adapter outcome of the most recent sinkpush

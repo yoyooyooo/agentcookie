@@ -19,12 +19,13 @@ import (
 // legacy Security.SharedSecret field is kept for backwards compat with v0
 // configs that predate pairing.
 type SourceConfig struct {
-	Sink     SinkRef                    `yaml:"sink" json:"sink"`
-	Chrome   ChromeRef                  `yaml:"chrome" json:"chrome"`
-	Browser  BrowserRef                 `yaml:"browser,omitempty" json:"browser,omitempty"`
-	Peer     PeerRef                    `yaml:"peer,omitempty" json:"peer,omitempty"`
-	Security SecurityRef                `yaml:"security,omitempty" json:"security,omitempty"`
-	Targets  map[string]SourceTargetRef `yaml:"targets,omitempty" json:"targets,omitempty"`
+	Sink       SinkRef                    `yaml:"sink" json:"sink"`
+	Chrome     ChromeRef                  `yaml:"chrome" json:"chrome"`
+	Browser    BrowserRef                 `yaml:"browser,omitempty" json:"browser,omitempty"`
+	Peer       PeerRef                    `yaml:"peer,omitempty" json:"peer,omitempty"`
+	Security   SecurityRef                `yaml:"security,omitempty" json:"security,omitempty"`
+	Targets    map[string]SourceTargetRef `yaml:"targets,omitempty" json:"targets,omitempty"`
+	RealChrome RealChromeRef              `yaml:"real_chrome,omitempty" json:"real_chrome,omitempty"`
 	// Cmux configures the same-machine local loop: `agentcookie cmux-sync`
 	// reads this machine's Chrome and injects into this machine's cmux
 	// browser. Independent of the sink/peer push path; absent = loop off.
@@ -51,15 +52,16 @@ type SourceConfig struct {
 // written before this field keeps its current behavior with no migration
 // and no silent flip on a binary upgrade.
 type SinkConfig struct {
-	Listen           ListenRef   `yaml:"listen" json:"listen"`
-	Chrome           ChromeRef   `yaml:"chrome" json:"chrome"`
-	Peer             PeerRef     `yaml:"peer,omitempty" json:"peer,omitempty"`
-	Security         SecurityRef `yaml:"security,omitempty" json:"security,omitempty"`
-	SkipChromeSQLite bool        `yaml:"skip_chrome_sqlite,omitempty" json:"skip_chrome_sqlite,omitempty"`
-	CDP              CDPRef      `yaml:"cdp,omitempty" json:"cdp,omitempty"`
-	LiveCDP          LiveCDPRef  `yaml:"live_cdp,omitempty" json:"live_cdp,omitempty"`
-	Cmux             CmuxRef     `yaml:"cmux,omitempty" json:"cmux,omitempty"`
-	Delivery         string      `yaml:"delivery,omitempty" json:"delivery,omitempty"`
+	Listen           ListenRef     `yaml:"listen" json:"listen"`
+	Chrome           ChromeRef     `yaml:"chrome" json:"chrome"`
+	Peer             PeerRef       `yaml:"peer,omitempty" json:"peer,omitempty"`
+	Security         SecurityRef   `yaml:"security,omitempty" json:"security,omitempty"`
+	SkipChromeSQLite bool          `yaml:"skip_chrome_sqlite,omitempty" json:"skip_chrome_sqlite,omitempty"`
+	CDP              CDPRef        `yaml:"cdp,omitempty" json:"cdp,omitempty"`
+	LiveCDP          LiveCDPRef    `yaml:"live_cdp,omitempty" json:"live_cdp,omitempty"`
+	RealChrome       RealChromeRef `yaml:"real_chrome,omitempty" json:"real_chrome,omitempty"`
+	Cmux             CmuxRef       `yaml:"cmux,omitempty" json:"cmux,omitempty"`
+	Delivery         string        `yaml:"delivery,omitempty" json:"delivery,omitempty"`
 }
 
 // CmuxRef configures the cmux cookie-delivery surface (a fourth surface
@@ -108,6 +110,17 @@ type CDPRef struct {
 type LiveCDPRef struct {
 	Enabled  bool   `yaml:"enabled" json:"enabled"`
 	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"` // default http://127.0.0.1:9223
+}
+
+// RealChromeRef delivers cookies into the user's ordinary Google Chrome
+// Default profile. Chrome must first be prepared with `agentcookie chrome
+// enable`; writes then use its loopback DevTools endpoint and never edit
+// Chrome SQLite directly.
+type RealChromeRef struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	UserDataDir  string   `yaml:"user_data_dir,omitempty" json:"user_data_dir,omitempty"`
+	AutoApprove  bool     `yaml:"auto_approve,omitempty" json:"auto_approve,omitempty"`
+	DomainFilter []string `yaml:"domain_filter,omitempty" json:"domain_filter,omitempty"`
 }
 
 // PeerRef names the other side of a paired sync relationship. Hostname is
@@ -316,6 +329,10 @@ func resolveSourcePaths(path string, cfg *SourceConfig) error {
 	if cfg.Cmux.CmuxPath != "" {
 		cfg.Cmux.CmuxPath = ExpandTilde(cfg.Cmux.CmuxPath)
 	}
+	cfg.RealChrome.UserDataDir = ExpandTilde(cfg.RealChrome.UserDataDir)
+	if err := validateRealChrome(path, cfg.RealChrome); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -348,6 +365,10 @@ func LoadSink(dir string) (*SinkConfig, error) {
 	if cfg.Cmux.CmuxPath != "" {
 		cfg.Cmux.CmuxPath = ExpandTilde(cfg.Cmux.CmuxPath)
 	}
+	cfg.RealChrome.UserDataDir = ExpandTilde(cfg.RealChrome.UserDataDir)
+	if err := validateRealChrome(path, cfg.RealChrome); err != nil {
+		return nil, err
+	}
 	// Linux sink defaults: skip Chrome SQLite (no Keychain to read Safe Storage),
 	// enable live CDP attach (inject into agent runtime's Chrome).
 	if IsLinux() {
@@ -375,6 +396,15 @@ func applyLinuxSinkDefaults(cfg *SinkConfig) {
 	if !cfg.CDP.Enabled {
 		cfg.LiveCDP.Enabled = true
 	}
+}
+
+func validateRealChrome(path string, ref RealChromeRef) error {
+	for i, pattern := range ref.DomainFilter {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("%s: real_chrome.domain_filter[%d] is empty", path, i)
+		}
+	}
+	return nil
 }
 
 // validateSharedSecret enforces a 32-byte minimum on the legacy

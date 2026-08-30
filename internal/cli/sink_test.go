@@ -18,6 +18,7 @@ import (
 	"github.com/mvanhorn/agentcookie/internal/chrome"
 	"github.com/mvanhorn/agentcookie/internal/config"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
+	"github.com/mvanhorn/agentcookie/internal/realchrome"
 	"github.com/mvanhorn/agentcookie/internal/state"
 	"github.com/mvanhorn/agentcookie/internal/transport"
 	"github.com/mvanhorn/agentcookie/pkg/sidecar"
@@ -467,9 +468,46 @@ func TestCDPInjector_FailureDoesNotPropagate(t *testing.T) {
 	}
 }
 
+func TestSinkSyncInjectsConfiguredOrdinaryChrome(t *testing.T) {
+	fx := newSinkHandlerFixture(t, false)
+	fx.cfg.RealChrome = config.RealChromeRef{Enabled: true, AutoApprove: true}
+	writeCLIFile(t, filepath.Join(fx.configDir, "blocklist.yaml"), `
+version: 1
+policy: blocklist
+domains: []
+`)
+	var injected []chrome.Cookie
+	restore := SetRealChromeInjectorForTesting(func(_ context.Context, opts realchrome.Options, cookies []chrome.Cookie) (realchrome.Result, error) {
+		if !opts.AutoApprove {
+			t.Error("AutoApprove = false")
+		}
+		injected = append([]chrome.Cookie(nil), cookies...)
+		return realchrome.Result{Cookies: len(cookies), Port: 9222, ApprovalClicked: true}, nil
+	})
+	defer restore()
+
+	rec := fx.postSync(1, []chrome.Cookie{{HostKey: ".facebook.com", Name: "session", Value: "secret", Path: "/"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "real_chrome: injected 1 cookies") {
+		t.Fatalf("response=%q", rec.Body.String())
+	}
+	if len(injected) != 1 || injected[0].HostKey != ".facebook.com" {
+		t.Fatalf("injected=%v", injected)
+	}
+	if fx.sinkState.RealChrome == nil || fx.sinkState.RealChrome.TotalInjects != 1 || fx.sinkState.RealChrome.LastCookies != 1 {
+		t.Fatalf("real Chrome state=%+v", fx.sinkState.RealChrome)
+	}
+	if fx.sinkState.LastWriteMode != "sidecar+adapter+realchrome" {
+		t.Fatalf("write mode=%q", fx.sinkState.LastWriteMode)
+	}
+}
+
 type sinkHandlerFixture struct {
 	configDir  string
 	home       string
+	cfg        *config.SinkConfig
 	mux        *http.ServeMux
 	secret     string
 	seqTracker *protocol.SequenceTracker
@@ -502,6 +540,7 @@ func newSinkHandlerFixture(t *testing.T, dryRun bool) *sinkHandlerFixture {
 	return &sinkHandlerFixture{
 		configDir:  configDir,
 		home:       home,
+		cfg:        cfg,
 		mux:        mux,
 		secret:     secret,
 		seqTracker: seqTracker,

@@ -25,6 +25,7 @@ import (
 	"github.com/mvanhorn/agentcookie/internal/keystore"
 	"github.com/mvanhorn/agentcookie/internal/livecdp"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
+	"github.com/mvanhorn/agentcookie/internal/realchrome"
 	"github.com/mvanhorn/agentcookie/internal/secretsbus"
 	"github.com/mvanhorn/agentcookie/internal/sinkpush"
 	"github.com/mvanhorn/agentcookie/internal/state"
@@ -339,6 +340,20 @@ func newSinkMux(
 			}
 		}
 
+		// Ordinary Chrome is a distinct delivery surface from live_cdp. It
+		// targets the user's normal Google Chrome Default profile through
+		// Chrome's persisted, user-approved loopback endpoint.
+		var ordinaryChromeResult realchrome.Result
+		var ordinaryChromeErr error
+		if cfg.RealChrome.Enabled && len(cookies) > 0 {
+			ordinaryChromeResult, ordinaryChromeErr = injectConfiguredRealChrome(r.Context(), cfg.RealChrome, cookies)
+			if ordinaryChromeErr != nil {
+				fmt.Fprintf(os.Stderr, "agentcookie sink: ordinary Chrome injection failed (sidecar write succeeded): %v\n", ordinaryChromeErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "agentcookie sink: ordinary Chrome injection pushed %d cookies on loopback port %d\n", ordinaryChromeResult.Cookies, ordinaryChromeResult.Port)
+			}
+		}
+
 		// v0.11: after the cookie write commits, push the decrypted set
 		// into each registered PP CLI's local session cache. This is the
 		// step that lets kooky-using AND pycookiecheat-using PP CLIs run
@@ -413,6 +428,23 @@ func newSinkMux(
 				sinkState.LiveCDP.TotalInjects++
 			}
 		}
+		if cfg.RealChrome.Enabled && len(cookies) > 0 {
+			sinkState.LastWriteMode += "+realchrome"
+			if sinkState.RealChrome == nil {
+				sinkState.RealChrome = &state.RealChromeState{Enabled: true}
+			}
+			sinkState.RealChrome.LastInjectAt = time.Now().UTC()
+			sinkState.RealChrome.LastCookies = ordinaryChromeResult.Cookies
+			sinkState.RealChrome.Port = ordinaryChromeResult.Port
+			sinkState.RealChrome.ApprovalClicked = ordinaryChromeResult.ApprovalClicked
+			if ordinaryChromeErr != nil {
+				sinkState.RealChrome.LastError = ordinaryChromeErr.Error()
+				sinkState.RealChrome.TotalFailures++
+			} else {
+				sinkState.RealChrome.LastError = ""
+				sinkState.RealChrome.TotalInjects++
+			}
+		}
 		if len(adapterResults) > 0 {
 			sinkState.LastAdapterResults = toStateAdapterResults(adapterResults)
 		}
@@ -439,6 +471,16 @@ func newSinkMux(
 				okLine += fmt.Sprintf("; live_cdp: injected %d cookies into %d context(s) at %s", len(cookies), liveCDPContexts, endpoint)
 			} else if len(cookies) == 0 {
 				okLine += fmt.Sprintf("; live_cdp: no cookies to inject (endpoint=%s)", endpoint)
+			}
+		}
+		if cfg.RealChrome.Enabled {
+			switch {
+			case ordinaryChromeErr != nil:
+				okLine += fmt.Sprintf("; real_chrome: FAILED: %v", ordinaryChromeErr)
+			case ordinaryChromeResult.Cookies > 0:
+				okLine += fmt.Sprintf("; real_chrome: injected %d cookies on loopback port %d", ordinaryChromeResult.Cookies, ordinaryChromeResult.Port)
+			case len(cookies) == 0:
+				okLine += "; real_chrome: no cookies to inject"
 			}
 		}
 		_, _ = fmt.Fprintln(w, okLine)

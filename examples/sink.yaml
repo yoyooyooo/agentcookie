@@ -39,7 +39,26 @@ live_cdp:
 # to write Chrome's encrypted cookie database. All injection is via CDP.
 skip_chrome_sqlite: true
 
-# --- macOS-only options (do not use on Linux) ---
+# --- macOS ordinary Chrome delivery ---
+#
+# To deliver into the user's normal Google Chrome Default profile, prepare
+# Chrome once with `agentcookie chrome enable`, then use this surface. It is
+# distinct from live_cdp: live_cdp targets externally managed automation
+# browsers; real_chrome discovers the normal profile through
+# DevToolsActivePort and never edits its SQLite database.
+#
+# real_chrome:
+#   enabled: true
+#   auto_approve: true
+#   # user_data_dir: ~/Library/Application Support/Google/Chrome
+#   # domain_filter:
+#   #   - "example.com"
+#   #   - "%.example.com"
+#
+# Keep skip_chrome_sqlite: true when real_chrome is the intended delivery
+# surface. Chrome itself persists cookies received over its live endpoint.
+#
+# --- other macOS-only options (do not use on Linux) ---
 #
 # cdp:
 #   # Launches a managed Chrome subprocess with its own profile.

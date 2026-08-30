@@ -30,6 +30,19 @@ browser:
   name: dia
   profile: Default
 
+# Optional same-machine delivery into the user's ordinary Google Chrome
+# Default profile. Prepare it once with `agentcookie chrome enable`; every
+# source cycle then injects the filtered source cookies into the live Chrome
+# Cookie Store without editing Chrome SQLite or launching another browser.
+# real_chrome:
+#   enabled: true
+#   auto_approve: true
+#   # user_data_dir: ~/Library/Application Support/Google/Chrome
+#   # Empty means all source-policy-approved cookies. Narrow when appropriate:
+#   # domain_filter:
+#   #   - "example.com"
+#   #   - "%.example.com"
+
 # An explicit path overrides the browser/profile-derived Cookies path.
 # chrome:
 #   db_path: ~/Library/Application Support/Dia/User Data/Default/Cookies

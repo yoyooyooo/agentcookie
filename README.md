@@ -346,7 +346,29 @@ agentcookie wizard install --as sink \
   --pair-url http://<source-mac>:9998/pair
 ```
 
-The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and per-CLI adapter session files. It can also run CDP injection into a managed Chrome subprocess. See [docs/quickstart.md](docs/quickstart.md) for the full macOS-to-macOS walkthrough.
+To deliver into that machine's ordinary Google Chrome Default profile, enable
+Chrome's loopback endpoint once and select the explicit surface:
+
+```bash
+agentcookie chrome enable
+```
+
+```yaml
+# sink.yaml
+skip_chrome_sqlite: true
+real_chrome:
+  enabled: true
+  auto_approve: true
+```
+
+A source Mac can use the same `real_chrome` block in `source.yaml`, for example
+when Dia is the authoritative browser and ordinary Chrome is a local consumer.
+The sync cycle writes through live Chrome, not SQLite, and does not launch a
+second browser. See [Ordinary Google Chrome delivery](docs/ordinary-chrome.md).
+
+Legacy macOS SQLite and managed-profile modes remain available for existing
+installations. See [docs/quickstart.md](docs/quickstart.md) for the full
+macOS-to-macOS walkthrough.
 
 ## On-demand Agent Browser sessions (fork capability)
 
@@ -380,6 +402,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Working today
 
+- Live injection into the user's ordinary Google Chrome Default profile on macOS (`real_chrome`)
 - On-demand injection into one named, isolated Agent Browser session
 - One source to many independently paired sinks, with optional target policies
 - Mac to Linux continuous sync via Tailscale `/sync`
@@ -413,6 +436,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 |---|---|
 | [Fork policy](docs/fork/POLICY.md) | upstream mirror, generation, CI, and immutable release rules |
 | [Fork generation v1.1.0](docs/fork/generations/v1.1.0.md) | baseline, delta decisions, verification, and deployment receipts |
+| [Ordinary Chrome](docs/ordinary-chrome.md) | inject source/sink Cookies into the user's normal Google Chrome Default profile |
 | [Agent Browser sessions](docs/agent-browser-sessions.md) | inject current source/sink cookies into one named temporary session |
 | [Architecture](docs/architecture.md) | module layout, sync lifecycle, security boundaries |
 | [Protocol v1](docs/protocol.md) | wire format spec for future client implementations |

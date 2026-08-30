@@ -368,6 +368,28 @@ func pushOnce(
 		return 0, dbsc, nil
 	}
 
+	// The source may also be a consumer: Dia can remain the authority while
+	// this machine's ordinary Google Chrome receives the same live identity.
+	// This path attaches to Chrome's user-approved loopback endpoint and never
+	// edits Chrome SQLite.
+	var localChromeErr error
+	if cfg.RealChrome.Enabled && len(all) > 0 {
+		localResult, injectErr := injectConfiguredRealChrome(ctx, cfg.RealChrome, all)
+		result["real_chrome"] = map[string]any{
+			"enabled":          true,
+			"cookies":          localResult.Cookies,
+			"port":             localResult.Port,
+			"approval_clicked": localResult.ApprovalClicked,
+		}
+		if injectErr != nil {
+			localChromeErr = fmt.Errorf("ordinary Chrome injection: %w", injectErr)
+			result["real_chrome_error"] = injectErr.Error()
+			fmt.Fprintf(os.Stderr, "agentcookie source: ordinary Chrome injection failed; remote targets will still be attempted: %v\n", injectErr)
+		} else if !common.JSON {
+			fmt.Fprintf(os.Stderr, "agentcookie source: injected %d cookies into ordinary Chrome\n", localResult.Cookies)
+		}
+	}
+
 	// v0.7: pack Local Storage and IndexedDB alongside cookies from the
 	// configured source browser/profile. The envelope carries the bytes, the
 	// sink unpacks into its real Chrome profile. Errors fetching either are
@@ -406,6 +428,9 @@ func pushOnce(
 
 	targetResults := make(map[string]any, len(targets))
 	var targetErrs []error
+	if localChromeErr != nil {
+		targetErrs = append(targetErrs, localChromeErr)
+	}
 	succeeded := 0
 	for _, target := range targets {
 		targetCookies := all

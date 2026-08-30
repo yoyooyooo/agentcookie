@@ -57,6 +57,24 @@ policy: blocklist and domains: [] to enable sync-all. This is an EXPLICIT operat
 choice, not the code default. The code default remains security-by-default.
 ```
 
+### Ordinary Google Chrome delivery (macOS)
+
+```text
+source machine                         sink machine
+Dia/Chrome -> decrypted Cookie set     encrypted /sync -> official sidecar
+              \                       /
+               real_chrome delivery
+                    -> discover normal Chrome DevToolsActivePort
+                    -> attach on loopback with Chrome approval
+                    -> Network.setCookies in Default profile
+                    -> Chrome owns persistence
+```
+
+The same surface can run on a source (for example Dia SSoT -> local ordinary
+Chrome) or a sink (remote source -> local ordinary Chrome). It neither writes
+Chrome SQLite nor launches a managed browser. `agentcookie chrome enable`
+performs the one-time persisted Chrome preparation.
+
 ### On-demand Agent Browser session (fork)
 
 ```text
@@ -85,7 +103,8 @@ closes it. agentcookie never owns a page target or opens a second CDP connection
 | `internal/pairing` | X25519 + HKDF handshake. Source listens for pairing; sink connects with the printed code. Both sides derive identical 32-byte keys. |
 | `internal/keystore` | Per-peer key files at `~/.config/agentcookie/keys/<peer>.json` mode 0600. |
 | `internal/protocol` | `SyncEnvelope` (versioned), `SequenceTracker` (in-memory replay defense), `BlocklistMatcher` (SQLite-LIKE patterns, case-insensitive). |
-| `internal/livecdp` | High-fidelity Cookie shaping and `Storage.setCookies` injection for existing browser contexts. |
+| `internal/livecdp` | High-fidelity Cookie shaping and live CDP injection for existing browser contexts. |
+| `internal/realchrome` | Discover, prepare, approve, and inject the user's ordinary Google Chrome Default profile. |
 | `pkg/sidecar` | Public reader for the sink's latest materialized Cookie set, including metadata used by session injection. |
 | `internal/cdp` | CDP path for seeding a managed persistent Chrome profile. |
 

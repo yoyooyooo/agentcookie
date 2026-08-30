@@ -712,6 +712,52 @@ domains:
 	}
 }
 
+func TestLoadSourceRealChrome(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "source.yaml", `
+targets:
+  sink:
+    url: http://sink.test:9999/sync
+    peer: sink
+browser:
+  name: dia
+real_chrome:
+  enabled: true
+  user_data_dir: ~/Library/Application Support/Google/Chrome
+  auto_approve: true
+  domain_filter:
+    - "%.facebook.com"
+`)
+	cfg, err := LoadSource(dir)
+	if err != nil {
+		t.Fatalf("LoadSource: %v", err)
+	}
+	if !cfg.RealChrome.Enabled || !cfg.RealChrome.AutoApprove {
+		t.Fatalf("RealChrome = %+v", cfg.RealChrome)
+	}
+	if strings.HasPrefix(cfg.RealChrome.UserDataDir, "~") {
+		t.Fatalf("user_data_dir was not expanded: %q", cfg.RealChrome.UserDataDir)
+	}
+}
+
+func TestLoadSinkRealChromeRejectsEmptyFilter(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "sink.yaml", `
+listen:
+  addr: 100.80.229.80:9999
+peer:
+  hostname: source
+real_chrome:
+  enabled: true
+  domain_filter:
+    - ""
+`)
+	_, err := LoadSink(dir)
+	if err == nil || !strings.Contains(err.Error(), "real_chrome.domain_filter") {
+		t.Fatalf("LoadSink error = %v", err)
+	}
+}
+
 func TestExpandTilde(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	cases := map[string]string{

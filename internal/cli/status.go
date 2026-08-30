@@ -182,6 +182,20 @@ var statusCmd = &cobra.Command{
 					fmt.Printf("      last error: %s\n", cdp.LastError)
 				}
 			}
+			if rc := st.SinkState.RealChrome; rc != nil && rc.Enabled {
+				rcAgo := "never"
+				if !rc.LastInjectAt.IsZero() {
+					rcAgo = time.Since(rc.LastInjectAt).Round(time.Second).String() + " ago"
+				}
+				fmt.Printf("    real_chrome: port=%d, %d injects, %d failures, last inject %s\n",
+					rc.Port, rc.TotalInjects, rc.TotalFailures, rcAgo)
+				if rc.LastCookies > 0 {
+					fmt.Printf("      last inject: %d cookies into ordinary Chrome\n", rc.LastCookies)
+				}
+				if rc.LastError != "" {
+					fmt.Printf("      last error: %s\n", rc.LastError)
+				}
+			}
 		}
 		if st.ChromeStores != nil && len(st.ChromeStores.Stores) > 0 {
 			decryptNote := ""
