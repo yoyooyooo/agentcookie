@@ -3,20 +3,16 @@
 # sign.sh - Sign a macOS binary with the agentcookie Developer ID identity.
 #
 # Reads AGENTCOOKIE_SIGN_IDENTITY from the environment, falling back to
-# the maintainer's Developer ID Application identity. Hardened Runtime
-# (--options runtime) and secure timestamping (--timestamp) are required
-# so the binary qualifies for notarization (scripts/notarize.sh). After
-# notarization, macOS Gatekeeper accepts the binary on any Mac without
-# user-interactive approval -- the property that makes agentcookie
-# trivial to deploy across a laptop + sink pair without manual System
-# Settings clicks per binary. --force is required so a previously-signed
-# binary can be re-signed in place (steady-state behavior after every
-# `go install`).
+# the maintainer's Developer ID Application identity. Fork release CI may
+# instead set AGENTCOOKIE_SIGN_MODE=adhoc when no Apple signing authority is
+# configured. Ad-hoc signatures are integrity-neutral packaging metadata:
+# they are never described as Developer ID signed or notarized.
 #
 # Usage:
 #   scripts/sign.sh <binary> [<binary> ...]
 #
 # Environment:
+#   AGENTCOOKIE_SIGN_MODE      developer-id (default) or adhoc.
 #   AGENTCOOKIE_SIGN_IDENTITY  codesign identity string (CN of the cert,
 #                              or the SHA-1 fingerprint).
 #                              Default: "Developer ID Application: Matthew
@@ -35,6 +31,7 @@ set -euo pipefail
 readonly DEFAULT_IDENTITY="Developer ID Application: Matthew Charles Van Horn (NM8VT393AR)"
 readonly RUNBOOK="docs/runbook-v0.12-codesign.md"
 
+MODE="${AGENTCOOKIE_SIGN_MODE:-developer-id}"
 IDENTITY="${AGENTCOOKIE_SIGN_IDENTITY:-$DEFAULT_IDENTITY}"
 
 if [[ $# -lt 1 ]]; then
@@ -42,11 +39,20 @@ if [[ $# -lt 1 ]]; then
   exit 1
 fi
 
+case "$MODE" in
+  developer-id|adhoc) ;;
+  *)
+    echo "scripts/sign.sh: unsupported AGENTCOOKIE_SIGN_MODE: $MODE" >&2
+    exit 1
+    ;;
+esac
+
 # Confirm the identity is in the codesigning keychain before we burn time on
 # codesign(1)'s own opaque error. `security find-identity -v -p codesigning`
 # lists every cert that can sign on this machine; grep matches either the CN
 # or the SHA-1 fingerprint form.
-if ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
+if [[ "$MODE" == "developer-id" ]] && \
+   ! security find-identity -v -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
   cat >&2 <<EOF
 scripts/sign.sh: codesign identity not found on this machine.
 
@@ -68,13 +74,22 @@ for binary in "$@"; do
     exit 1
   fi
 
-  echo "scripts/sign.sh: signing $binary"
-  codesign \
-    --force \
-    --options runtime \
-    --timestamp \
-    --sign "$IDENTITY" \
-    "$binary"
+  if [[ "$MODE" == "adhoc" ]]; then
+    echo "scripts/sign.sh: ad-hoc signing $binary (not notarizable)"
+    codesign \
+      --force \
+      --options runtime \
+      --sign - \
+      "$binary"
+  else
+    echo "scripts/sign.sh: Developer ID signing $binary"
+    codesign \
+      --force \
+      --options runtime \
+      --timestamp \
+      --sign "$IDENTITY" \
+      "$binary"
+  fi
 
   echo "scripts/sign.sh: verifying $binary"
   codesign --verify --deep --strict --verbose=2 "$binary"

@@ -15,10 +15,10 @@ Source acceptance does not imply an artifact exists or is deployed.
 
 ## Tag Namespace
 
-Use an immutable fork-specific tag:
+Use an immutable, annotated fork-specific tag:
 
 ```bash
-fork-v1.1.0-r1
+fork-v1.1.0-r4
 ```
 
 Before creating it, show and record the exact candidate:
@@ -30,27 +30,54 @@ git rev-list --merges v1.1.0..fork/v1.1.0
 git diff --check v1.1.0..fork/v1.1.0
 ```
 
-Never use or move the official `v1.1.0` namespace. A correction receives
-`fork-v1.1.0-r2`; `r1` remains immutable.
+Never use or move the official `v1.1.0` namespace. A correction receives the
+next `rN`; every prior tag remains immutable.
 
 ## CI Release Path
 
-The GitHub workflow listens only for `fork-v*`. It remains gated by the
-repository variable `RELEASE_CI_ENABLED=true`. Portable Darwin releases also
-require repository variables `AGENTCOOKIE_SIGN_IDENTITY`, `APPLE_ID`, and
-`APPLE_TEAM_ID`, plus the certificate and notary Secrets used by the workflow.
-The workflow fails closed when this fork-owned signing authority is absent; it
-never falls back to the upstream maintainer's identity. Repository config
-cannot prove those host settings, so inspect them before tagging.
+A pushed `fork-v*` tag starts the release workflow. The prepare job rejects a
+tag unless it matches `fork-vX.Y.Z-rN`, is annotated, and peels to the exact
+workflow SHA.
 
-The expected release contains Linux and Darwin archives plus `checksums.txt`.
-The release title includes `fork` to avoid confusing it with an official
-agentcookie release.
+GoReleaser requires SemVer, so CI presents the derived `vX.Y.Z-rN` only to its
+version parser while injecting the full immutable fork tag into the binary and
+archive name. The Git and GitHub release authority remains `fork-vX.Y.Z-rN`.
+
+Linux archives are unsigned and integrity-bound by SHA-256. Darwin release mode
+is explicit:
+
+- when fork-owned Developer ID variables and Secrets are complete, CI signs and
+  notarizes every Darwin binary;
+- when no signing identity is configured, CI ad-hoc signs the binaries and
+  records `signingMode: adhoc` plus `notarized: false` in the release manifest;
+- a partially configured Developer ID mode fails closed and never downgrades.
+
+Expected assets:
+
+```text
+agentcookie_fork-vX.Y.Z-rN_darwin_arm64.tar.gz
+agentcookie_fork-vX.Y.Z-rN_darwin_amd64.tar.gz
+agentcookie_fork-vX.Y.Z-rN_linux_amd64.tar.gz
+agentcookie_fork-vX.Y.Z-rN_linux_arm64.tar.gz
+checksums.txt
+release-manifest.json
+```
+
+## Consumer Verification
+
+Install an exact tag rather than an unpinned latest release. Verify the selected
+archive against `checksums.txt`, then verify that `release-manifest.json` names
+the same tag, source SHA, platform, architecture, and digest. On Darwin,
+`codesign --verify --strict` must also pass; the manifest determines whether the
+signature is Developer ID/notarized or ad-hoc.
+
+The legacy-named `scripts/install-beta.sh` implements exact-tag download and
+checksum verification for Darwin installs. The filename is retained for
+compatibility; its verification contract is not beta-only.
 
 ## Local Development Artifacts
 
-A local build is suitable for the same operator's machines but is not a public
-signed release:
+A local build is suitable for development but is not a public release:
 
 ```bash
 make build
@@ -58,17 +85,8 @@ make build
 shasum -a 256 ./bin/agentcookie
 ```
 
-On Linux:
-
-```bash
-go build -ldflags \
-  "-X github.com/mvanhorn/agentcookie/internal/cli.Version=fork-v1.1.0-r1" \
-  -o ~/.local/bin/agentcookie ./cmd/agentcookie
-sha256sum ~/.local/bin/agentcookie
-```
-
-Record these as unsigned/ad-hoc development artifacts. Do not claim Apple
-notarization unless `codesign`, `notarytool`, and Gatekeeper readback all pass.
+Record local binaries as unsigned/ad-hoc development artifacts. Do not claim
+Apple notarization unless the Developer ID, notarytool, and readbacks all pass.
 
 ## Deployment Receipt
 
@@ -88,8 +106,8 @@ rollback_source:
 ```
 
 For a running sink, runtime readback includes `/healthz`, the listener address,
-and process supervisor status. For on-demand session injection it includes the
-real Agent Browser E2E result without exposing Cookie values.
+and supervisor status. For on-demand session injection it includes the real
+Agent Browser E2E result without exposing Cookie values.
 
 ## Rollback
 

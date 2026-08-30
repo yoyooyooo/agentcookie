@@ -1,6 +1,19 @@
 # Changelog
 
-## [Fork Unreleased]
+## [fork-v1.1.0-r4] - 2026-08-30
+
+### Release distribution
+
+- Added CI-built Darwin arm64/amd64 and Linux arm64/amd64 archives with an
+  exact fork version embedded in every binary.
+- Added `checksums.txt` and a machine-readable `release-manifest.json` binding
+  the immutable tag, peeled source SHA, platform, architecture, digest, and
+  Darwin signing/notarization status.
+- Made Darwin signing explicit: fork-owned Developer ID credentials produce a
+  notarized build; otherwise CI produces a clearly labeled ad-hoc build without
+  claiming Apple portability.
+- Made the release installer accept an exact fork tag and require SHA-256
+  verification before extracting or installing a binary.
 
 ### Agent skill
 

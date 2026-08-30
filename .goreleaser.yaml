@@ -19,23 +19,26 @@ builds:
       - arm64
       - amd64
     ldflags:
-      - -s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version={{ .Version }}
+      - -s -w -X github.com/mvanhorn/agentcookie/internal/cli.Version={{ .Env.AGENTCOOKIE_RELEASE_VERSION }}
     hooks:
       post:
-        - cmd: scripts/sign.sh {{ .Path }}
+        - cmd: scripts/prepare-darwin-release-binary.sh {{ .Path }}
           output: true
 
 archives:
   - id: agentcookie
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .ProjectName }}_{{ .Env.AGENTCOOKIE_RELEASE_VERSION }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE
       - README.md
+      - CHANGELOG.md
+      - skill/SKILL.md
+      - skill/prompts/install-on-both-machines.md
+      - scripts/install-beta.sh
       - docs/agent-browser-sessions.md
       - docs/fork/POLICY.md
       - docs/fork/RELEASING.md
       - docs/fork/generations/v1.1.0.md
-      - docs/quickstart.md
       - docs/threat-model.md
       - docs/architecture.md
       - docs/protocol.md
@@ -49,7 +52,7 @@ checksum:
   name_template: checksums.txt
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ .Version }}-next"
 
 changelog:
   sort: asc

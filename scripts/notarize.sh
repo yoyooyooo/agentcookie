@@ -64,26 +64,26 @@ for binary in "$@"; do
   ditto -c -k --keepParent "$binary" "$tmpzip"
 
   echo "scripts/notarize.sh: submitting $binary (waiting for Apple)"
+  result_json="$(mktemp -t agentcookie-notary-result.XXXXXX).json"
   if ! xcrun notarytool submit "$tmpzip" \
        --keychain-profile "$PROFILE" \
        --wait \
-       --output-format json > /tmp/notary-result.json; then
+       --output-format json > "$result_json"; then
     echo "scripts/notarize.sh: notarytool rejected the submission" >&2
-    cat /tmp/notary-result.json >&2 || true
-    rm -f "$tmpzip"
+    cat "$result_json" >&2 || true
+    rm -f "$tmpzip" "$result_json"
     exit 3
   fi
 
   # Mach-O binaries cannot be stapled (stapling targets bundles, dmgs,
   # installers). Gatekeeper does an online check at first run; the
-  # accepted record is what matters here. We do verify the result was
-  # Accepted before exiting.
-  if ! grep -q '"status": *"Accepted"' /tmp/notary-result.json; then
+  # accepted record is what matters here.
+  if ! grep -q '"status": *"Accepted"' "$result_json"; then
     echo "scripts/notarize.sh: submission did not return Accepted status" >&2
-    cat /tmp/notary-result.json >&2
-    rm -f "$tmpzip"
+    cat "$result_json" >&2
+    rm -f "$tmpzip" "$result_json"
     exit 3
   fi
   echo "scripts/notarize.sh: $binary accepted by Apple"
-  rm -f "$tmpzip"
+  rm -f "$tmpzip" "$result_json"
 done

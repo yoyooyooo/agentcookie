@@ -9,10 +9,45 @@ permissions:
   contents: write
 
 jobs:
-  # Build Linux binaries on Ubuntu using .goreleaser.linux.yaml
-  build-linux:
+  prepare:
     runs-on: ubuntu-latest
-    if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      semver_tag: ${{ steps.release.outputs.semver_tag }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - id: release
+        name: validate immutable fork tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^fork-v[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]] || {
+            echo "invalid fork release tag: $tag" >&2
+            exit 1
+          }
+          [[ "$(git cat-file -t "refs/tags/$tag")" == "tag" ]] || {
+            echo "fork release tags must be annotated" >&2
+            exit 1
+          }
+          source_sha="$(git rev-list -n 1 "$tag")"
+          [[ "$source_sha" == "$GITHUB_SHA" ]] || {
+            echo "tag peels to $source_sha, workflow is at $GITHUB_SHA" >&2
+            exit 1
+          }
+          {
+            echo "release_version=$tag"
+            echo "semver_tag=${tag#fork-}"
+            echo "source_sha=$source_sha"
+          } >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -23,32 +58,42 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Install cross-compiler for arm64
       - name: install arm64 cross-compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      # Use goreleaser with the linux-specific config
-      - name: goreleaser linux
+      - name: build Linux release archives
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: "v2.14.3"
           args: release --clean --config .goreleaser.linux.yaml --skip=publish
         env:
+          AGENTCOOKIE_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.semver_tag }}
+          GORELEASER_PREVIOUS_TAG: v1.1.0
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: upload linux artifacts
+      - name: record Linux build metadata
+        run: |
+          jq -n \
+            --arg version "${{ needs.prepare.outputs.release_version }}" \
+            '{platform:"linux", version:$version, signingMode:"unsigned", notarized:false, builder:"github-actions/goreleaser-v2"}' \
+            > dist/linux-build.json
+
+      - name: upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-binaries
-          path: dist/*.tar.gz
+          if-no-files-found: error
+          path: |
+            dist/*.tar.gz
+            dist/linux-build.json
 
-  # Build darwin binaries on macOS (codesigning requires macOS)
   build-darwin:
+    needs: prepare
     runs-on: macos-latest
-    if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -59,88 +104,136 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: validate fork signing configuration
+      - id: signing
+        name: select explicit Darwin signing mode
+        shell: bash
         env:
           SIGN_IDENTITY: ${{ vars.AGENTCOOKIE_SIGN_IDENTITY }}
           APPLE_ID: ${{ vars.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.AC_NOTARY_PASSWORD }}
+          CERTIFICATE: ${{ secrets.CERTIFICATE_OSX_APPLICATION }}
+          CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_OSX_APPLICATION_PASSWORD }}
         run: |
-          test -n "$SIGN_IDENTITY" || { echo "missing repository variable AGENTCOOKIE_SIGN_IDENTITY" >&2; exit 1; }
-          test -n "$APPLE_ID" || { echo "missing repository variable APPLE_ID" >&2; exit 1; }
-          test -n "$APPLE_TEAM_ID" || { echo "missing repository variable APPLE_TEAM_ID" >&2; exit 1; }
-          test -n "$NOTARY_PASSWORD" || { echo "missing secret AC_NOTARY_PASSWORD" >&2; exit 1; }
+          set -euo pipefail
+          if [[ -z "$SIGN_IDENTITY" ]]; then
+            echo "mode=adhoc" >> "$GITHUB_OUTPUT"
+            echo "notarized=false" >> "$GITHUB_OUTPUT"
+            echo "No fork-owned Developer ID configured; publishing an explicitly ad-hoc, non-notarized Darwin build."
+            exit 0
+          fi
+          for required in APPLE_ID APPLE_TEAM_ID NOTARY_PASSWORD CERTIFICATE CERTIFICATE_PASSWORD; do
+            [[ -n "${!required}" ]] || {
+              echo "Developer ID mode requested but $required is missing" >&2
+              exit 1
+            }
+          done
+          echo "mode=developer-id" >> "$GITHUB_OUTPUT"
+          echo "notarized=true" >> "$GITHUB_OUTPUT"
 
-      - name: import Developer ID cert
+      - name: import Developer ID certificate
+        if: steps.signing.outputs.mode == 'developer-id'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.CERTIFICATE_OSX_APPLICATION }}
           p12-password: ${{ secrets.CERTIFICATE_OSX_APPLICATION_PASSWORD }}
 
-      - name: list codesigning identities
-        run: security find-identity -v -p codesigning
-
-      - name: setup notarytool credentials
+      - name: set up notarytool credentials
+        if: steps.signing.outputs.mode == 'developer-id'
         run: |
           xcrun notarytool store-credentials agentcookie-fork-notary \
             --apple-id "${{ vars.APPLE_ID }}" \
             --team-id "${{ vars.APPLE_TEAM_ID }}" \
             --password "${{ secrets.AC_NOTARY_PASSWORD }}"
 
-      - name: make release
+      - name: build Darwin release archives
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "v2.14.3"
+          args: release --clean --config .goreleaser.yaml --skip=publish
         env:
+          AGENTCOOKIE_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
+          AGENTCOOKIE_DARWIN_RELEASE_MODE: ${{ steps.signing.outputs.mode }}
           AGENTCOOKIE_SIGN_IDENTITY: ${{ vars.AGENTCOOKIE_SIGN_IDENTITY }}
           AGENTCOOKIE_NOTARY_PROFILE: agentcookie-fork-notary
-        run: make release
+          GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.semver_tag }}
+          GORELEASER_PREVIOUS_TAG: v1.1.0
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: build release tarball
-        run: scripts/release-tarball.sh "${{ github.ref_name }}"
+      - name: record Darwin build metadata
+        run: |
+          jq -n \
+            --arg version "${{ needs.prepare.outputs.release_version }}" \
+            --arg mode "${{ steps.signing.outputs.mode }}" \
+            --argjson notarized "${{ steps.signing.outputs.notarized }}" \
+            '{platform:"darwin", version:$version, signingMode:$mode, notarized:$notarized, builder:"github-actions/goreleaser-v2"}' \
+            > dist/darwin-build.json
 
-      - name: upload darwin artifacts
+      - name: upload Darwin artifacts
         uses: actions/upload-artifact@v4
         with:
           name: darwin-binaries
-          path: dist/*.tar.gz
+          if-no-files-found: error
+          path: |
+            dist/*.tar.gz
+            dist/darwin-build.json
 
-  # Publish release after both builds complete
   publish:
+    needs: [prepare, build-linux, build-darwin]
     runs-on: ubuntu-latest
-    needs: [build-linux, build-darwin]
-    if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: download linux artifacts
+      - name: download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: linux-binaries
-          path: dist/
+          path: dist
 
-      - name: download darwin artifacts
+      - name: download Darwin artifacts
         uses: actions/download-artifact@v4
         with:
           name: darwin-binaries
-          path: dist/
+          path: dist
 
-      - name: list artifacts
-        run: ls -la dist/
-
-      # Generate checksums for all archives
-      - name: generate checksums
+      - name: generate checksums and release manifest
+        shell: bash
         run: |
+          set -euo pipefail
           cd dist
-          sha256sum *.tar.gz > checksums.txt
-          cat checksums.txt
+          find . -maxdepth 1 -type f -name '*.tar.gz' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            | sed 's#  \./#  #' > checksums.txt
+          cd ..
+          scripts/generate-release-manifest.sh \
+            "${{ needs.prepare.outputs.release_version }}" \
+            "${{ needs.prepare.outputs.source_sha }}" \
+            dist
+          cat dist/checksums.txt
+          jq . dist/release-manifest.json
 
-      # Create the GitHub release with all assets
-      - name: create release
-        run: |
-          gh release create "${{ github.ref_name }}" \
-            dist/*.tar.gz \
-            dist/checksums.txt \
-            --title "agentcookie fork ${{ github.ref_name }}" \
-            --generate-notes
+      - name: create immutable GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ needs.prepare.outputs.release_version }}" \
+            dist/*.tar.gz \
+            dist/checksums.txt \
+            dist/release-manifest.json \
+            --verify-tag \
+            --title "agentcookie fork ${{ needs.prepare.outputs.release_version }}" \
+            --notes-file .github/RELEASE_NOTES_TEMPLATE.md
+
+      - name: verify published asset set
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "${{ needs.prepare.outputs.release_version }}" \
+            --json tagName,isDraft,isPrerelease,assets \
+            --jq '{tagName,isDraft,isPrerelease,assets:[.assets[].name]}'

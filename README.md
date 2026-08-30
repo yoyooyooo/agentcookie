@@ -68,22 +68,49 @@ The sink injects cookies directly into a fixed Chrome's in-memory store via the 
 
 ## Install
 
-### Maintained fork generation
+### Maintained fork release
 
-Until an immutable `fork-v*` release asset is published, build from the active
-generation clone. The module path intentionally remains upstream-compatible,
-so do not use the fork URL with `go install`:
+Install the fork from the immutable `fork-v1.1.0-r4` GitHub Release. The module
+path intentionally remains upstream-compatible, so do not use the fork URL with
+`go install`.
+
+Choose the archive for the target architecture and verify it before extraction:
 
 ```bash
-git clone --branch fork/v1.1.0 git@github.com:yoyooyooo/agentcookie.git
-cd agentcookie
-make build
-install -m 0755 ./bin/agentcookie ~/.local/bin/agentcookie
+VERSION=fork-v1.1.0-r4
+REPO=https://github.com/yoyooyooo/agentcookie/releases/download/$VERSION
+
+# macOS arm64
+curl -fLO "$REPO/agentcookie_${VERSION}_darwin_arm64.tar.gz"
+curl -fLO "$REPO/checksums.txt"
+curl -fLO "$REPO/release-manifest.json"
+shasum -a 256 -c checksums.txt --ignore-missing
+
+# Linux amd64: replace darwin_arm64 above with linux_amd64, then run
+# sha256sum -c checksums.txt --ignore-missing
 ```
 
-Use the same accepted generation on every machine that needs named Agent
-Browser session injection. Exact release, checksum, signing, and deployment
-rules are in [the fork release runbook](docs/fork/RELEASING.md).
+After verification, extract the archive and install its `agentcookie` binary to
+`~/.local/bin/agentcookie`. Confirm the exact generation:
+
+```bash
+agentcookie version
+# fork-v1.1.0-r4
+```
+
+`release-manifest.json` records the source SHA and Darwin signing mode. A Darwin
+asset marked `adhoc` is checksummed but is not Developer ID signed or
+Apple-notarized; `xattr -c ~/.local/bin/agentcookie` may be needed after manual
+download. Exact release, signing, checksum, and rollback rules are in
+[the fork release runbook](docs/fork/RELEASING.md).
+
+For development from source, clone the exact tag instead of a floating branch:
+
+```bash
+git clone --branch fork-v1.1.0-r4 git@github.com:yoyooyooo/agentcookie.git
+cd agentcookie
+make build
+```
 
 ### Official upstream binaries
 

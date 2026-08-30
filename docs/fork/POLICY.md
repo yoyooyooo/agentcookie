@@ -75,13 +75,16 @@ enabled.
 ## Releases
 
 Fork releases use `fork-vX.Y.Z-rN`, never the official `vX.Y.Z` namespace.
-Release evidence must name:
+A release may use either fork-owned Developer ID signing/notarization or an
+explicit ad-hoc Darwin mode; the latter must be labeled in the manifest and
+must never be described as portable or notarized. Every release records:
 
 - accepted generation SHA;
 - immutable fork tag;
 - archive SHA-256 digest;
 - target architecture;
 - signing/notarization status;
+- signing/notarization mode for each Darwin artifact;
 - deployed binary digest and `agentcookie version` readback;
 - rollback tag/artifact.
 

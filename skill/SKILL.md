@@ -2,7 +2,7 @@
 name: agentcookie
 description: >-
   Reuse an existing authenticated browser identity in one named agent-browser session. Use alongside agent-browser whenever a website task may need the user's current login, or when working with agentcookie, Dia/Chrome Cookie SSoT, cross-machine Cookie sync, source/sink status, or session injection. Inject before the first authenticated navigation so the user does not need to repeat the Cookie workflow.
-version: 1.1.0-fork.3
+version: 1.1.0-fork.4
 ---
 
 # agentcookie

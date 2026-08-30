@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 #
-# install-beta.sh - One-command installer for the agentcookie closed beta.
+# install-beta.sh - Verified release installer for agentcookie.
 #
-# Friends run this script with `--as source` (on the laptop they browse on)
-# or `--as sink` (on the second Mac their agents run on). It verifies
-# prereqs, places the notarized agentcookie binary, and kicks off the
-# wizard install interactively. End-state on success: `agentcookie
-# doctor` reports all-green.
+# Run this script with `--as source` (on the workstation that owns the source
+# browser) or `--as sink` (on the agent host). It verifies the release archive,
+# places the binary, and starts the wizard interactively.
 #
 # Usage:
 #   ./install-beta.sh --as source
@@ -26,22 +24,26 @@
 #   --bin-dir <dir>            Where to place the agentcookie binary.
 #                              Default: /usr/local/bin if writable,
 #                              else $HOME/bin.
-#   --tarball <path>           Use a local tarball instead of fetching
-#                              the latest release.
+#   --tarball <path>           Use a local tarball instead of fetching a release.
+#   --version <fork-tag>       Download this exact release tag. Recommended.
+#   --checksum-file <path>     checksums.txt for a local tarball.
 #
 # Environment:
-#   AGENTCOOKIE_REPO           Release repository. Defaults to this maintained
-#                              fork (`yoyooyooo/agentcookie`).
+#   AGENTCOOKIE_REPO             Release repository. Defaults to this maintained
+#                               fork (`yoyooyooo/agentcookie`).
+#   AGENTCOOKIE_VERSION          Exact release tag; overridden by --version.
+#   AGENTCOOKIE_EXPECTED_TEAM_ID Optional Developer ID TeamIdentifier. When
+#                               unset, checksum verification remains mandatory
+#                               and ad-hoc Darwin signatures are reported.
 #
 # Design notes:
-#   - Bash, not Go. Friends will read 80 lines of Bash; they will not
-#     read a 17 MB binary.
+#   - Bash, not Go, so operators can audit the install path without reading the
+#     compiled program.
 #   - No sudo. If a step needs elevated privileges, we print the command
 #     and ask the user to run it themselves.
 #   - Idempotent. Re-running on a healthy install reports state and
 #     exits 0 without re-running the wizard.
-#   - Fails loud. Every step that can fail prints a remediation
-#     pointer to the closed-beta quickstart.
+#   - Fails loud. Every step that can fail prints a remediation pointer.
 
 set -euo pipefail
 
@@ -54,6 +56,8 @@ EXTRA_WIZARD_ARGS=()
 EXTRA_BINS=()
 BIN_DIR=""
 TARBALL=""
+VERSION="${AGENTCOOKIE_VERSION:-}"
+CHECKSUM_FILE=""
 
 REPO="${AGENTCOOKIE_REPO:-yoyooyooo/agentcookie}"
 
@@ -61,7 +65,7 @@ REPO="${AGENTCOOKIE_REPO:-yoyooyooo/agentcookie}"
 
 die() {
   echo "install-beta.sh: $*" >&2
-  echo "install-beta.sh: see docs/quickstart-beta.md for help" >&2
+  echo "install-beta.sh: see README.md for help" >&2
   exit 1
 }
 
@@ -102,6 +106,10 @@ while [[ $# -gt 0 ]]; do
       BIN_DIR="$2"; shift 2 ;;
     --tarball)
       TARBALL="$2"; shift 2 ;;
+    --version)
+      VERSION="$2"; shift 2 ;;
+    --checksum-file)
+      CHECKSUM_FILE="$2"; shift 2 ;;
     -h|--help)
       sed -n '1,35p' "$0" >&2
       exit 0 ;;
@@ -137,28 +145,65 @@ fi
 ok "Tailscale is up"
 
 if ! ls /Applications/Google\ Chrome.app >/dev/null 2>&1 && \
-   ! ls "$HOME/Applications/Google Chrome.app" >/dev/null 2>&1; then
-  warn "Google Chrome not found in /Applications. agentcookie is designed for Chrome; other browsers are not supported in this beta."
+   ! ls "$HOME/Applications/Google Chrome.app" >/dev/null 2>&1 && \
+   ! ls /Applications/Dia.app >/dev/null 2>&1 && \
+   ! ls "$HOME/Applications/Dia.app" >/dev/null 2>&1; then
+  warn "No supported Chromium-family source browser was found in Applications."
 fi
 
 # ---- locate tarball / fetch release ----
 
+if [[ -n "$VERSION" && ! "$VERSION" =~ ^fork-v[0-9]+\.[0-9]+\.[0-9]+-r[0-9]+$ ]]; then
+  die "invalid --version value: $VERSION"
+fi
+
 if [[ -z "$TARBALL" ]]; then
   if ! command -v gh >/dev/null 2>&1; then
-    die "GitHub CLI (gh) not found, and no --tarball provided. Either install gh + 'gh auth login', or download the release tarball manually and re-run with --tarball <path>."
+    die "GitHub CLI (gh) not found, and no --tarball provided. Install gh or pass --tarball and --checksum-file."
   fi
   if ! gh auth status >/dev/null 2>&1; then
     die "gh is not authenticated. Run 'gh auth login' first."
   fi
-  step "downloading latest release from $REPO"
-  TMP_DL="$(mktemp -d -t agentcookie-beta.XXXXXX)"
-  gh release download --repo "$REPO" --pattern '*darwin_arm64.tar.gz' --dir "$TMP_DL" --clobber
-  TARBALL="$(ls -1 "$TMP_DL"/*.tar.gz | head -n1)"
+  if [[ -z "$VERSION" ]]; then
+    warn "no exact --version supplied; resolving the repository's latest non-prerelease release"
+  fi
+  step "downloading ${VERSION:-latest release} from $REPO"
+  TMP_DL="$(mktemp -d -t agentcookie-release.XXXXXX)"
+  DOWNLOAD_ARGS=(release download)
+  if [[ -n "$VERSION" ]]; then
+    DOWNLOAD_ARGS+=("$VERSION")
+  fi
+  DOWNLOAD_ARGS+=(
+    --repo "$REPO"
+    --pattern '*darwin_arm64.tar.gz'
+    --pattern 'checksums.txt'
+    --dir "$TMP_DL"
+    --clobber
+  )
+  gh "${DOWNLOAD_ARGS[@]}"
+  TARBALL="$(find "$TMP_DL" -maxdepth 1 -type f -name '*darwin_arm64.tar.gz' -print -quit)"
+  CHECKSUM_FILE="$TMP_DL/checksums.txt"
   if [[ -z "$TARBALL" || ! -f "$TARBALL" ]]; then
     die "release tarball not found after download (looked in $TMP_DL)"
   fi
   ok "downloaded $(basename "$TARBALL")"
 fi
+
+if [[ -z "$CHECKSUM_FILE" ]]; then
+  sibling_checksum="$(dirname "$TARBALL")/checksums.txt"
+  if [[ -f "$sibling_checksum" ]]; then
+    CHECKSUM_FILE="$sibling_checksum"
+  fi
+fi
+[[ -f "$CHECKSUM_FILE" ]] || die "checksums.txt is required; pass --checksum-file for a local tarball"
+
+step "verifying release archive checksum"
+archive_name="$(basename "$TARBALL")"
+expected_sha="$(awk -v name="$archive_name" '$2 == name {print $1}' "$CHECKSUM_FILE")"
+[[ "$expected_sha" =~ ^[0-9a-fA-F]{64}$ ]] || die "no unique SHA-256 entry for $archive_name in $CHECKSUM_FILE"
+actual_sha="$(shasum -a 256 "$TARBALL" | awk '{print $1}')"
+[[ "$actual_sha" == "$expected_sha" ]] || die "SHA-256 mismatch for $archive_name"
+ok "archive SHA-256 matches checksums.txt"
 
 # ---- extract and verify binary ----
 
@@ -172,20 +217,30 @@ if [[ -z "$NEW_BIN" || ! -x "$NEW_BIN" ]]; then
   die "agentcookie binary not found inside tarball ($TARBALL)"
 fi
 
+archive_version="${archive_name#agentcookie_}"
+archive_version="${archive_version%_darwin_arm64.tar.gz}"
+binary_version="$("$NEW_BIN" version)"
+[[ "$archive_version" == "$binary_version" ]] || die "archive version $archive_version does not match binary version $binary_version"
+if [[ -n "$VERSION" && "$binary_version" != "$VERSION" ]]; then
+  die "downloaded binary version $binary_version does not match requested version $VERSION"
+fi
+ok "binary version matches the release archive: $binary_version"
+
 step "verifying code signature"
-# spctl -a is the wrong tool for CLI binaries (it assesses for app
-# bundles and reports "rejected: not an app" even when the binary is
-# correctly signed + notarized). Use codesign + Developer ID OU check
-# instead.
-if codesign --verify --strict --verbose=2 "$NEW_BIN" >/dev/null 2>&1; then
-  if codesign -d -r- "$NEW_BIN" 2>&1 | grep -q "subject.OU. = NM8VT393AR"; then
-    ok "binary is signed with the agentcookie Developer ID (NM8VT393AR)"
-  else
-    warn "binary signature is valid but Developer ID OU does not match NM8VT393AR"
-    warn "continuing; this binary may be from a fork or an unofficial build"
-  fi
+if ! codesign --verify --strict --verbose=2 "$NEW_BIN" >/dev/null 2>&1; then
+  die "codesign verification failed for the release binary"
+fi
+
+signature_details="$(codesign -d --verbose=4 "$NEW_BIN" 2>&1 || true)"
+team_id="$(awk -F= '/^TeamIdentifier=/{print $2}' <<<"$signature_details")"
+expected_team_id="${AGENTCOOKIE_EXPECTED_TEAM_ID:-}"
+if [[ -n "$expected_team_id" ]]; then
+  [[ "$team_id" == "$expected_team_id" ]] || die "Developer ID TeamIdentifier does not match AGENTCOOKIE_EXPECTED_TEAM_ID"
+  ok "Developer ID TeamIdentifier matches the configured fork authority"
+elif [[ -n "$team_id" && "$team_id" != "not set" ]]; then
+  ok "valid Developer ID signature (TeamIdentifier $team_id)"
 else
-  warn "codesign verification failed; LaunchAgent launches may be blocked by Gatekeeper. Continuing anyway."
+  warn "binary is ad-hoc signed and not Apple-notarized; archive SHA-256 was verified"
 fi
 
 xattr -c "$NEW_BIN" 2>/dev/null || true
@@ -288,12 +343,9 @@ DOCTOR_EXIT=0
 
 # ---- next steps hint (sink role only) ----
 #
-# A common friend pitfall after install: they SSH into the sink, type
-# `instacart-pp-cli carts` (the example from quickstart-beta.md), and
-# get `command not found`. agentcookie itself ships independent of the
-# PP CLIs that consume its cookies; the friend has to install at least
-# one PP CLI on the sink for the headline value to materialize. Make
-# that step impossible to miss.
+# A common operator pitfall after install is invoking a PP CLI before one has
+# been installed. agentcookie ships independently from those consumers, so make
+# the next step explicit.
 if [[ "$ROLE" == "sink" ]]; then
   echo
   echo "==============================================================="
