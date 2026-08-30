@@ -14,11 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -50,11 +50,11 @@ jobs:
     runs-on: macos-latest
     if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -108,7 +108,7 @@ jobs:
     needs: [build-linux, build-darwin]
     if: ${{ vars.RELEASE_CI_ENABLED == 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
