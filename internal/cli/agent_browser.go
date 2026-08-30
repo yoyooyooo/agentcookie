@@ -5,10 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
+	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +16,6 @@ import (
 
 	"github.com/mvanhorn/agentcookie/internal/chrome"
 	"github.com/mvanhorn/agentcookie/internal/config"
-	"github.com/mvanhorn/agentcookie/internal/livecdp"
 	"github.com/mvanhorn/agentcookie/internal/protocol"
 	"github.com/mvanhorn/agentcookie/internal/sinkpush"
 	"github.com/mvanhorn/agentcookie/pkg/sidecar"
@@ -49,8 +48,9 @@ var agentBrowserInjectCmd = &cobra.Command{
 
 The command reads the live source browser when source.yaml is present, or the
 latest official sink sidecar on a sink machine. If the named session is not
-running, it starts the browser on about:blank, discovers that session's dynamic
-loopback CDP endpoint, and injects before any application navigation.
+running, it starts the browser on about:blank and sends high-fidelity cookie
+commands through agent-browser's own batch stdin protocol before
+any application navigation.
 
   agentcookie agent-browser inject --session task --domain github.com
   agent-browser --session task open https://github.com
@@ -78,11 +78,10 @@ type agentBrowserInjectOptions struct {
 }
 
 type agentBrowserInjectResult struct {
-	Session  string `json:"session"`
-	Source   string `json:"source"`
-	Cookies  int    `json:"cookies"`
-	Contexts int    `json:"contexts"`
-	Started  bool   `json:"started"`
+	Session string `json:"session"`
+	Source  string `json:"source"`
+	Cookies int    `json:"cookies"`
+	Started bool   `json:"started"`
 }
 
 func runAgentBrowserInject(cmd *cobra.Command, _ []string) error {
@@ -111,14 +110,12 @@ func runAgentBrowserInject(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	result.Source = source
-	result.Cookies = len(cookies)
 	return emit(map[string]any{
-		"session":  result.Session,
-		"source":   result.Source,
-		"cookies":  result.Cookies,
-		"contexts": result.Contexts,
-		"started":  result.Started,
-	}, fmt.Sprintf("agentcookie agent-browser: injected %d cookies into session %q (%d context(s), source=%s)\n", result.Cookies, result.Session, result.Contexts, result.Source))
+		"session": result.Session,
+		"source":  result.Source,
+		"cookies": result.Cookies,
+		"started": result.Started,
+	}, fmt.Sprintf("agentcookie agent-browser: injected %d cookies into session %q (source=%s)\n", result.Cookies, result.Session, result.Source))
 }
 
 func loadAgentBrowserCookies(opts agentBrowserInjectOptions) ([]chrome.Cookie, string, error) {
@@ -251,10 +248,80 @@ func boolInt(value bool) int {
 	return 0
 }
 
+const chromeToUnixEpochSeconds = 11644473600
+
+func agentBrowserCookieCommands(cookies []chrome.Cookie) [][]string {
+	commands := make([][]string, 0, len(cookies))
+	for _, cookie := range cookies {
+		if cookie.Name == "" || cookie.HostKey == "" {
+			continue
+		}
+
+		path := cookie.Path
+		if path == "" {
+			path = "/"
+		}
+		secure := cookie.IsSecure == 1
+		command := []string{"cookies", "set", cookie.Name, cookie.Value}
+		host := strings.TrimPrefix(cookie.HostKey, ".")
+
+		switch {
+		case strings.HasPrefix(cookie.Name, "__Host-"):
+			secure = true
+			path = "/"
+			command = append(command, "--url", "https://"+host)
+		case strings.HasPrefix(cookie.HostKey, "."):
+			command = append(command, "--domain", cookie.HostKey)
+		default:
+			scheme := "http"
+			if secure {
+				scheme = "https"
+			}
+			command = append(command, "--url", scheme+"://"+host)
+		}
+
+		command = append(command, "--path", path)
+		if secure {
+			command = append(command, "--secure")
+		}
+		if cookie.IsHTTPOnly == 1 {
+			command = append(command, "--httpOnly")
+		}
+		if sameSite := agentBrowserSameSite(cookie.SameSite, secure); sameSite != "" {
+			command = append(command, "--sameSite", sameSite)
+		}
+		if cookie.ExpiresUTC > 0 {
+			unixSeconds := cookie.ExpiresUTC/1_000_000 - chromeToUnixEpochSeconds
+			if unixSeconds > 0 {
+				command = append(command, "--expires", strconv.FormatInt(unixSeconds, 10))
+			}
+		}
+		commands = append(commands, command)
+	}
+	return commands
+}
+
+func agentBrowserSameSite(value int, secure bool) string {
+	switch value {
+	case 0:
+		if secure {
+			return "None"
+		}
+		return "Lax"
+	case 1:
+		return "Lax"
+	case 2:
+		return "Strict"
+	default:
+		return ""
+	}
+}
+
 type agentBrowserRunner func(ctx context.Context, binary string, args ...string) ([]byte, error)
+type agentBrowserBatchRunner func(ctx context.Context, binary string, stdin []byte, args ...string) error
 
 var runAgentBrowser = execAgentBrowser
-var injectAgentBrowserCDP = livecdp.InjectBrowserWebSocket
+var runAgentBrowserBatch = execAgentBrowserBatch
 
 func execAgentBrowser(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -271,6 +338,19 @@ func execAgentBrowser(ctx context.Context, binary string, args ...string) ([]byt
 	return nil, fmt.Errorf("agent-browser %s: %w", strings.Join(args, " "), err)
 }
 
+func execAgentBrowserBatch(ctx context.Context, binary string, stdin []byte, args ...string) error {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Stdin = bytes.NewReader(stdin)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		// Batch stdin contains Cookie values. Do not include child output or
+		// arguments in this error even if agent-browser changes its diagnostics.
+		return fmt.Errorf("agent-browser batch failed: %w", err)
+	}
+	return nil
+}
+
 func injectNamedAgentBrowserSession(ctx context.Context, opts agentBrowserInjectOptions, cookies []chrome.Cookie) (result agentBrowserInjectResult, err error) {
 	result.Session = opts.Session
 	binary := opts.Binary
@@ -279,6 +359,15 @@ func injectNamedAgentBrowserSession(ctx context.Context, opts agentBrowserInject
 		if err != nil {
 			return result, fmt.Errorf("agent-browser inject: find agent-browser: %w", err)
 		}
+	}
+
+	commands := agentBrowserCookieCommands(cookies)
+	if len(commands) == 0 {
+		return result, fmt.Errorf("agent-browser inject: no valid cookies to inject")
+	}
+	batch, err := json.Marshal(commands)
+	if err != nil {
+		return result, fmt.Errorf("agent-browser inject: encode batch: %w", err)
 	}
 
 	active, err := agentBrowserSessionActive(ctx, binary, opts.Session)
@@ -302,21 +391,10 @@ func injectNamedAgentBrowserSession(ctx context.Context, opts agentBrowserInject
 		}
 	}()
 
-	wsURL, err := agentBrowserSessionCDPURL(ctx, binary, opts.Session)
-	if err != nil {
-		return result, err
-	}
-	wsURL, err = loopbackCDPWebSocket(wsURL)
-	if err != nil {
-		return result, err
-	}
-	result.Contexts, err = injectAgentBrowserCDP(ctx, wsURL, cookies)
-	if err != nil {
+	if err := runAgentBrowserBatch(ctx, binary, batch, "--session", opts.Session, "batch", "--bail"); err != nil {
 		return result, fmt.Errorf("agent-browser inject: inject session %q: %w", opts.Session, err)
 	}
-	if result.Contexts == 0 {
-		return result, fmt.Errorf("agent-browser inject: session %q has no injectable browser context", opts.Session)
-	}
+	result.Cookies = len(commands)
 	keepSession = true
 	return result, nil
 }
@@ -339,46 +417,4 @@ func agentBrowserSessionActive(ctx context.Context, binary, session string) (boo
 		return false, fmt.Errorf("agent-browser inject: session info reported failure")
 	}
 	return response.Data.Active, nil
-}
-
-func agentBrowserSessionCDPURL(ctx context.Context, binary, session string) (string, error) {
-	out, err := runAgentBrowser(ctx, binary, "--session", session, "get", "cdp-url", "--json")
-	if err != nil {
-		return "", fmt.Errorf("agent-browser inject: discover CDP for session %q: %w", session, err)
-	}
-	var response struct {
-		Success bool `json:"success"`
-		Data    struct {
-			CDPURL string `json:"cdpUrl"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(out, &response); err != nil {
-		return "", fmt.Errorf("agent-browser inject: decode CDP URL: %w", err)
-	}
-	if !response.Success || response.Data.CDPURL == "" {
-		return "", fmt.Errorf("agent-browser inject: session %q returned no CDP URL", session)
-	}
-	return response.Data.CDPURL, nil
-}
-
-func loopbackCDPWebSocket(raw string) (string, error) {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("agent-browser inject: parse CDP URL: %w", err)
-	}
-	if u.Scheme != "ws" && u.Scheme != "wss" {
-		return "", fmt.Errorf("agent-browser inject: CDP URL must use ws or wss (got %q)", u.Scheme)
-	}
-	hostname := u.Hostname()
-	ip := net.ParseIP(hostname)
-	if hostname != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return "", fmt.Errorf("agent-browser inject: refusing non-loopback CDP host %q", hostname)
-	}
-	if u.Port() == "" {
-		return "", fmt.Errorf("agent-browser inject: CDP URL has no port")
-	}
-	if !strings.HasPrefix(u.Path, "/devtools/browser/") {
-		return "", fmt.Errorf("agent-browser inject: expected a browser-level CDP WebSocket")
-	}
-	return u.String(), nil
 }

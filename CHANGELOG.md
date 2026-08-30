@@ -1,6 +1,6 @@
 # Changelog
 
-## [fork-v1.1.0-r1] - Unreleased
+## [fork-v1.1.0-r3] - Unreleased
 
 ### Agent Browser session injection
 
@@ -8,12 +8,10 @@
   on-demand injection into one isolated agent-browser instance.
 - Source machines read their configured browser, including Dia; sink machines
   consume the latest official sidecar with full cookie metadata.
-- Inactive sessions start on `about:blank`, dynamic CDP ports are discovered
-  through agent-browser, and non-loopback CDP endpoints are rejected.
-- Injection uses browser-level WebSocket commands and never owns or closes the
-  Agent Browser daemon's page target.
-- A bounded five-second readiness retry handles the startup window where a new
-  browser has published its WebSocket URL but resets an immediate second client.
+- Inactive sessions start on `about:blank`; Cookie commands are sent through
+  agent-browser's native JSON batch stdin protocol before navigation.
+- Cookie values do not enter argv, logs, output, or temporary files, and
+  agentcookie does not establish a second CDP WebSocket.
 - The optional real-browser E2E is validated repeatedly against agent-browser 0.33.0.
 - The fork requires Go 1.26.6, which clears the reachable standard-library
   vulnerabilities reported against the upstream 1.26.4 baseline.

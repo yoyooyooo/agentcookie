@@ -1,4 +1,4 @@
-# agentcookie fork-v1.1.0-r1
+# agentcookie fork-v1.1.0-r3
 
 Maintained fork generation based on official agentcookie `v1.1.0` at
 `97dd731250b0d9a340f2d0fa776346d807335d60`.
@@ -10,8 +10,8 @@ Maintained fork generation based on official agentcookie `v1.1.0` at
 - `AGENTCOOKIE_COOKIES_ONLY=1` excludes Local Storage, IndexedDB, and the
   secrets bus.
 - `agentcookie agent-browser inject --session <name>` grants the current local
-  Cookie set to one temporary Agent Browser session through dynamic loopback
-  CDP discovery.
+  Cookie set to one temporary Agent Browser session through agent-browser's
+  native JSON batch stdin protocol.
 - The official v1 source/sink envelope and `/sync` endpoint remain compatible.
 
 ## Integrity
@@ -53,8 +53,8 @@ make build
 ## Honest Limits
 
 - Google/Workspace DBSC identity generally requires local browser sign-in.
-- A same-user process can control an active Agent Browser session through its
-  loopback CDP endpoint.
+- A same-user process can control an active Agent Browser session; this remains
+  the local OS trust boundary.
 - Sink sidecar values are plaintext unless sidecar sealing is enabled.
 - Source acceptance, release assets, and deployment are separate claims; see
   the generation manifest for exact evidence.

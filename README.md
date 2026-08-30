@@ -334,10 +334,10 @@ agent-browser --session "$SESSION" open https://github.com
 agent-browser --session "$SESSION" close
 ```
 
-The command starts an inactive session on `about:blank`, discovers that
-session's dynamic loopback CDP endpoint, and injects before navigation. Source
-machines read their configured browser (including Dia); sink machines read the
-latest official sidecar. See [Agent Browser session injection](docs/agent-browser-sessions.md).
+The command starts an inactive session on `about:blank` and uses
+agent-browser's own stdin batch protocol to set Cookie metadata before
+navigation. Source machines read their configured browser (including Dia); sink
+machines read the latest official sidecar. See [Agent Browser session injection](docs/agent-browser-sessions.md).
 
 ## What about Chrome's device-bound cookies (DBSC)?
 

@@ -39,7 +39,7 @@ func TestAgentBrowserSessionInjectE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inject session: %v", err)
 	}
-	if !result.Started || result.Contexts < 1 {
+	if !result.Started || result.Cookies != 1 {
 		t.Fatalf("result = %+v", result)
 	}
 

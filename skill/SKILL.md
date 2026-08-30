@@ -235,8 +235,9 @@ agent-browser --session "$SESSION" close
 
 The inject command must run on the same machine and OS user as agent-browser.
 It reads the configured source browser on a source machine or the official
-sidecar on a sink, starts an inactive session on `about:blank`, and rejects any
-CDP endpoint that is not loopback. Prefer a narrow `--domain` for each job.
+sidecar on a sink and starts an inactive session on `about:blank`. Cookie values
+reach only agent-browser's local JSON batch stdin, never argv or a temporary
+file. Prefer a narrow `--domain` for each job.
 
 ## What to do if something errors
 

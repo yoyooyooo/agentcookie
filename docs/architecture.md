@@ -65,14 +65,13 @@ Dia/Chrome -> live read                official sink -> latest sidecar
               \                       /
                agentcookie agent-browser inject --session <name>
                     -> agent-browser session info
-                    -> dynamic loopback CDP discovery
-                    -> Storage.setCookies in that session only
+                    -> JSON cookie commands over batch stdin
+                    -> agent-browser writes its own session
 ```
 
 This local path does not alter the source/sink wire protocol. An inactive
 session starts on `about:blank`; after injection the caller navigates and later
-closes it. The CDP browser is session-owned and may use any dynamic port, but
-the discovered host must be loopback.
+closes it. agentcookie never owns a page target or opens a second CDP connection.
 
 ## Module layout
 

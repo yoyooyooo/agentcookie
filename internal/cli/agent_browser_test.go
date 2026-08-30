@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -83,33 +84,20 @@ domains: []
 	}
 }
 
-func TestLoopbackCDPWebSocket(t *testing.T) {
-	tests := []struct {
-		raw     string
-		want    string
-		wantErr bool
-	}{
-		{raw: "ws://127.0.0.1:62606/devtools/browser/id", want: "ws://127.0.0.1:62606/devtools/browser/id"},
-		{raw: "ws://[::1]:9222/devtools/browser/id", want: "ws://[::1]:9222/devtools/browser/id"},
-		{raw: "wss://localhost:9443/devtools/browser/id", want: "wss://localhost:9443/devtools/browser/id"},
-		{raw: "ws://100.101.1.2:9222/devtools/browser/id", wantErr: true},
-		{raw: "http://127.0.0.1:9222/json/version", wantErr: true},
-		{raw: "ws://127.0.0.1/devtools/browser/id", wantErr: true},
-		{raw: "ws://127.0.0.1:9222/devtools/page/id", wantErr: true},
+func TestAgentBrowserCookieCommandsPreserveMetadata(t *testing.T) {
+	expires := int64(chromeToUnixEpochSeconds+1_700_000_000) * 1_000_000
+	got := agentBrowserCookieCommands([]chrome.Cookie{
+		{HostKey: "app.example.com", Name: "__Host-session", Value: "host-value", Path: "/wrong", ExpiresUTC: expires, IsHTTPOnly: 1, SameSite: 0},
+		{HostKey: ".example.com", Name: "domain", Value: "domain-value", Path: "/app", SameSite: 0},
+		{HostKey: "api.example.net", Name: "host", Value: "host-only", SameSite: -1},
+	})
+	want := [][]string{
+		{"cookies", "set", "__Host-session", "host-value", "--url", "https://app.example.com", "--path", "/", "--secure", "--httpOnly", "--sameSite", "None", "--expires", "1700000000"},
+		{"cookies", "set", "domain", "domain-value", "--domain", ".example.com", "--path", "/app", "--sameSite", "Lax"},
+		{"cookies", "set", "host", "host-only", "--url", "http://api.example.net", "--path", "/"},
 	}
-	for _, tt := range tests {
-		t.Run(tt.raw, func(t *testing.T) {
-			got, err := loopbackCDPWebSocket(tt.raw)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got %q", got)
-				}
-				return
-			}
-			if err != nil || got != tt.want {
-				t.Fatalf("endpoint = %q, %v; want %q", got, err, tt.want)
-			}
-		})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("commands = %#v, want %#v", got, want)
 	}
 }
 
@@ -123,17 +111,22 @@ func TestInjectNamedAgentBrowserSessionStartsAndTargetsExactSession(t *testing.T
 				return []byte(`{"success":true,"data":{"active":false}}`), nil
 			case reflect.DeepEqual(args, []string{"--session", "task-a", "open"}):
 				return nil, nil
-			case reflect.DeepEqual(args, []string{"--session", "task-a", "get", "cdp-url", "--json"}):
-				return []byte(`{"success":true,"data":{"cdpUrl":"ws://127.0.0.1:62606/devtools/browser/id"}}`), nil
 			default:
 				return nil, fmt.Errorf("unexpected args %v", args)
 			}
 		},
-		func(_ context.Context, wsURL string, cookies []chrome.Cookie) (int, error) {
-			if wsURL != "ws://127.0.0.1:62606/devtools/browser/id" || len(cookies) != 1 {
-				t.Fatalf("inject wsURL=%q cookies=%d", wsURL, len(cookies))
+		func(_ context.Context, _ string, stdin []byte, args ...string) error {
+			if !reflect.DeepEqual(args, []string{"--session", "task-a", "batch", "--bail"}) {
+				t.Fatalf("batch args = %v", args)
 			}
-			return 1, nil
+			var commands [][]string
+			if err := json.Unmarshal(stdin, &commands); err != nil {
+				t.Fatalf("decode batch: %v", err)
+			}
+			if len(commands) != 1 || commands[0][2] != "session" || commands[0][3] != "value" {
+				t.Fatalf("batch commands = %v", commands)
+			}
+			return nil
 		},
 	)
 	defer restore()
@@ -144,10 +137,10 @@ func TestInjectNamedAgentBrowserSessionStartsAndTargetsExactSession(t *testing.T
 	if err != nil {
 		t.Fatalf("injectNamedAgentBrowserSession: %v", err)
 	}
-	if !result.Started || result.Contexts != 1 || result.Session != "task-a" {
+	if !result.Started || result.Cookies != 1 || result.Session != "task-a" {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(calls) != 3 || calls[1] != "--session task-a open" {
+	if len(calls) != 2 || calls[1] != "--session task-a open" {
 		t.Fatalf("calls = %v", calls)
 	}
 }
@@ -157,18 +150,13 @@ func TestInjectNamedAgentBrowserSessionClosesNewSessionOnFailure(t *testing.T) {
 	restore := stubAgentBrowserRuntime(t,
 		func(_ context.Context, _ string, args ...string) ([]byte, error) {
 			calls = append(calls, strings.Join(args, " "))
-			switch args[len(args)-1] {
-			case "--json":
-				if len(args) >= 2 && args[len(args)-2] == "info" {
-					return []byte(`{"success":true,"data":{"active":false}}`), nil
-				}
-				return []byte(`{"success":true,"data":{"cdpUrl":"ws://127.0.0.1:62606/devtools/browser/id"}}`), nil
-			default:
-				return nil, nil
+			if args[len(args)-1] == "--json" {
+				return []byte(`{"success":true,"data":{"active":false}}`), nil
 			}
+			return nil, nil
 		},
-		func(context.Context, string, []chrome.Cookie) (int, error) {
-			return 0, errors.New("inject failed")
+		func(context.Context, string, []byte, ...string) error {
+			return errors.New("inject failed")
 		},
 	)
 	defer restore()
@@ -187,15 +175,15 @@ func TestInjectNamedAgentBrowserSessionClosesNewSessionOnFailure(t *testing.T) {
 func stubAgentBrowserRuntime(
 	t *testing.T,
 	runner agentBrowserRunner,
-	injector func(context.Context, string, []chrome.Cookie) (int, error),
+	batchRunner agentBrowserBatchRunner,
 ) func() {
 	t.Helper()
 	oldRunner := runAgentBrowser
-	oldInjector := injectAgentBrowserCDP
+	oldBatchRunner := runAgentBrowserBatch
 	runAgentBrowser = runner
-	injectAgentBrowserCDP = injector
+	runAgentBrowserBatch = batchRunner
 	return func() {
 		runAgentBrowser = oldRunner
-		injectAgentBrowserCDP = oldInjector
+		runAgentBrowserBatch = oldBatchRunner
 	}
 }

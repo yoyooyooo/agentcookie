@@ -47,22 +47,17 @@ Each agent-browser session is an independent browser instance with its own
 cookies and storage. It is not the same concept as a named on-disk Chrome
 Profile.
 
-agentcookie asks agent-browser for the selected session's browser WebSocket:
+agentcookie sends one JSON array of `cookies set` commands to the selected
+session through agent-browser's own stdin batch protocol:
 
 ```bash
-agent-browser --session "$SESSION" get cdp-url --json
+agent-browser --session "$SESSION" batch --bail
 ```
 
-It connects directly to that browser-level WebSocket and uses
-`Storage.setCookies` against every BrowserContext in that browser. It does not
-create, attach to, own, or close a page target. No fixed debug port is required,
-so concurrent sessions cannot collide.
-
-Only loopback CDP hosts (`127.0.0.1`, `::1`, or `localhost`) are accepted. A
-remote or Tailnet CDP endpoint is rejected even when reachable. A newly launched
-browser can publish its WebSocket URL just before accepting another client;
-agentcookie retries the browser-level injection for up to five seconds without
-creating or closing page targets.
+No Cookie value appears in process arguments or a temporary file. agent-browser
+owns the browser connection and session lifecycle; agentcookie does not open a
+second CDP WebSocket, create a page target, or depend on a debug port. Concurrent
+session identity remains the external CLI's responsibility.
 
 ## Source and sink behavior
 
@@ -77,9 +72,9 @@ browser:
 
 On a sink machine, injection reads `~/.agentcookie/cookies-plain.db` through
 the public sidecar reader. The name is historical: values may be sealed when
-agentcookie sidecar sealing is enabled. Cookie domain, path, expiry, Secure,
-HttpOnly, persistence, priority, SameSite, scheme, and port metadata are
-preserved for CDP injection.
+agentcookie sidecar sealing is enabled. Cookie domain, host-only URL, path,
+expiry, Secure, HttpOnly, and SameSite metadata are mapped to agent-browser's
+native cookie command flags.
 
 The sink must use an official materializing path that writes the sidecar. A
 normal `skip_chrome_sqlite: true` sink still writes the sidecar and remains
@@ -89,8 +84,8 @@ compatible. No continuously running Agent Browser or Context Syncer is needed.
 
 - The source and sink cookie policies run before session injection.
 - Prefer `--domain` so an automation job receives only the identities it needs.
-- Cookie values are not written to command output or logs.
-- CDP is discovered locally and must resolve to loopback.
+- Cookie values are sent only through the local child process's stdin; they are
+  not written to argv, command output, logs, or temporary files.
 - Any process running as the same OS user can potentially control that user's
   agent-browser session; OS-user isolation remains the local trust boundary.
 - Device-bound sessions such as Google DBSC may not survive transfer even when
