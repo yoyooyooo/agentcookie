@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "fork/**"
+      - "release/**"
   pull_request:
     branches:
       - main
