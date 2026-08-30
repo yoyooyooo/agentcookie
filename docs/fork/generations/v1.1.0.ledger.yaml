@@ -9,9 +9,9 @@ generation:
     tag_object_sha: 87103215be1f239b52599039c1f48618dcd5a5f1
     sha: 97dd731250b0d9a340f2d0fa776346d807335d60
   accepted_source:
-    sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
-    tag: fork-v1.1.0-r5
-    tag_object_sha: 8af2efbb825154b79467c8bc9e91fd6c8650bfb7
+    sha: 2978bbcfca43fe6a886089ba381cd659dbab2c43
+    tag: fork-v1.1.0-r6
+    tag_object_sha: 8c188ff944375e4f9e6b7291822c3b9f97226ec3
     accepted_at: 2026-08-30
 
 deltas:
@@ -343,6 +343,26 @@ deltas:
       - codesign designated requirement equals identifier io.github.yoyooyooo.agentcookie
       - hosted macOS signing gate on the final candidate
 
+  - id: ordinary-chrome-skill-alignment
+    title: Route agents to ordinary Chrome, automation Chrome, or a named Agent Browser session explicitly
+    category: documentation
+    prior_commits: []
+    decision: rework
+    reason: The r4 bundled Skill described only Agent Browser session injection and could cause agents to mistake a successful Fortress or temporary-session injection for ordinary Chrome delivery.
+    accepted_commits:
+      - 6a9f8d4aebf8a73da130deb80b89d3fa50aabbb7
+    evidence:
+      - skill/SKILL.md
+      - skill/prompts/install-on-both-machines.md
+      - CHANGELOG.md
+    dependencies: [unattended-ordinary-google-chrome-delivery]
+    migration_impact: consumers that distribute the bundled Skill should pin r7 or later and refresh the projected skill
+    replay_branch: docs/ordinary-chrome-skill-v1.1.0
+    verification:
+      - generic narrative contains no operator-specific hostnames, paths, or topology
+      - full Go regression suite
+      - release archive source path remains skill
+
 release_tags:
   - name: fork-v1.1.0-r1
     tag_object_sha: c57ff47521b8ba9528547c67e23914781a1dd289
@@ -367,37 +387,42 @@ release_tags:
   - name: fork-v1.1.0-r5
     tag_object_sha: 8af2efbb825154b79467c8bc9e91fd6c8650bfb7
     source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
+    status: superseded-for-deployment
+    immutable: true
+  - name: fork-v1.1.0-r6
+    tag_object_sha: 8c188ff944375e4f9e6b7291822c3b9f97226ec3
+    source_sha: 2978bbcfca43fe6a886089ba381cd659dbab2c43
     status: active-artifact-and-deployment-authority
     immutable: true
 
 verification_runs:
-  accepted_source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
+  accepted_source_sha: 2978bbcfca43fe6a886089ba381cd659dbab2c43
   github:
-    ci: {id: 33312472992, conclusion: success}
-    lint: {id: 33312472958, conclusion: success}
-    govulncheck: {id: 33312473009, conclusion: success}
-    release: {id: 33312626157, conclusion: success}
+    ci: {id: 33317122250, conclusion: success}
+    lint: {id: 33317122259, conclusion: success}
+    govulncheck: {id: 33317122265, conclusion: success}
+    release: {id: 33317285930, conclusion: success}
   release_artifact:
     status: published
-    url: https://github.com/yoyooyooo/agentcookie/releases/tag/fork-v1.1.0-r5
+    url: https://github.com/yoyooyooo/agentcookie/releases/tag/fork-v1.1.0-r6
     public_download_verification: pass
     manifest:
       schema_version: 1
-      tag: fork-v1.1.0-r5
-      source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
+      tag: fork-v1.1.0-r6
+      source_sha: 2978bbcfca43fe6a886089ba381cd659dbab2c43
       upstream_tag: v1.1.0
       upstream_sha: 97dd731250b0d9a340f2d0fa776346d807335d60
-      darwin: {signing_mode: adhoc, notarized: false}
+      darwin: {signing_mode: adhoc, codesign_identifier: io.github.yoyooyooo.agentcookie, notarized: false}
       linux: {signing_mode: unsigned, notarized: false}
     archives:
-      - name: agentcookie_fork-v1.1.0-r5_darwin_amd64.tar.gz
-        sha256: 01e6cfc2476a3683a327905f879bf829fc0bdc1b155cc351b890077a88ce7f6a
-      - name: agentcookie_fork-v1.1.0-r5_darwin_arm64.tar.gz
-        sha256: 72ccab3fcd5a9c55f0f0e7c1770d1c1e7b792ee6deca9fce1fa95704cafa7b43
-      - name: agentcookie_fork-v1.1.0-r5_linux_amd64.tar.gz
-        sha256: e2155ca131dfbb7b243f33ad675964833a79354524c592c65ed5ea1376dc42f9
-      - name: agentcookie_fork-v1.1.0-r5_linux_arm64.tar.gz
-        sha256: e7e27efaa702dac84253be90387c3fbb970ce743dc7d520950bf99965a41a15b
+      - name: agentcookie_fork-v1.1.0-r6_darwin_amd64.tar.gz
+        sha256: ef80c4fbc9e9b1592f3cd4a63dc53ba5d2b27bdd1a20b8c1424e7ebfe49cc4cc
+      - name: agentcookie_fork-v1.1.0-r6_darwin_arm64.tar.gz
+        sha256: 1750f2c84b4484e08443b23ceb549c9e257a6e1b0da293ac8839b101574d3d38
+      - name: agentcookie_fork-v1.1.0-r6_linux_amd64.tar.gz
+        sha256: 8a5f4b1eb90d5537590146badb1f113c2d7f814f3c89f39dd72a3d0914e7dd76
+      - name: agentcookie_fork-v1.1.0-r6_linux_arm64.tar.gz
+        sha256: 37f6269aff71e9b53867a6aa17022172a57d907db348e2a0d8d9c02857dd2497
 
 deployment_validation:
   evidence_scope: public-role-level
