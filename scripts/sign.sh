@@ -17,6 +17,10 @@
 #                              or the SHA-1 fingerprint).
 #                              Default: "Developer ID Application: Matthew
 #                              Charles Van Horn (NM8VT393AR)"
+#   AGENTCOOKIE_CODESIGN_IDENTIFIER
+#                              Stable bundle-style identifier used by macOS
+#                              privacy and firewall policy across releases.
+#                              Default: "io.github.yoyooyooo.agentcookie".
 #
 # Exit codes:
 #   0  success
@@ -29,10 +33,12 @@
 set -euo pipefail
 
 readonly DEFAULT_IDENTITY="Developer ID Application: Matthew Charles Van Horn (NM8VT393AR)"
+readonly DEFAULT_CODESIGN_IDENTIFIER="io.github.yoyooyooo.agentcookie"
 readonly RUNBOOK="docs/runbook-v0.12-codesign.md"
 
 MODE="${AGENTCOOKIE_SIGN_MODE:-developer-id}"
 IDENTITY="${AGENTCOOKIE_SIGN_IDENTITY:-$DEFAULT_IDENTITY}"
+CODESIGN_IDENTIFIER="${AGENTCOOKIE_CODESIGN_IDENTIFIER:-$DEFAULT_CODESIGN_IDENTIFIER}"
 
 if [[ $# -lt 1 ]]; then
   echo "usage: scripts/sign.sh <binary> [<binary> ...]" >&2
@@ -79,6 +85,8 @@ for binary in "$@"; do
     codesign \
       --force \
       --options runtime \
+      --identifier "$CODESIGN_IDENTIFIER" \
+      --requirements "=designated => identifier \"$CODESIGN_IDENTIFIER\"" \
       --sign - \
       "$binary"
   else
@@ -86,6 +94,7 @@ for binary in "$@"; do
     codesign \
       --force \
       --options runtime \
+      --identifier "$CODESIGN_IDENTIFIER" \
       --timestamp \
       --sign "$IDENTITY" \
       "$binary"
@@ -93,6 +102,11 @@ for binary in "$@"; do
 
   echo "scripts/sign.sh: verifying $binary"
   codesign --verify --deep --strict --verbose=2 "$binary"
+  actual_identifier="$(codesign -d --verbose=4 "$binary" 2>&1 | awk -F= '/^Identifier=/{print $2; exit}')"
+  if [[ "$actual_identifier" != "$CODESIGN_IDENTIFIER" ]]; then
+    echo "scripts/sign.sh: identifier mismatch: got $actual_identifier, want $CODESIGN_IDENTIFIER" >&2
+    exit 3
+  fi
 done
 
 echo "scripts/sign.sh: done"

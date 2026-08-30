@@ -377,16 +377,18 @@ func pushOnce(
 		localResult, injectErr := injectConfiguredRealChrome(ctx, cfg.RealChrome, all)
 		result["real_chrome"] = map[string]any{
 			"enabled":          true,
+			"mode":             localResult.Mode,
 			"cookies":          localResult.Cookies,
 			"port":             localResult.Port,
 			"approval_clicked": localResult.ApprovalClicked,
+			"restarted":        localResult.Restarted,
 		}
 		if injectErr != nil {
 			localChromeErr = fmt.Errorf("ordinary Chrome injection: %w", injectErr)
 			result["real_chrome_error"] = injectErr.Error()
 			fmt.Fprintf(os.Stderr, "agentcookie source: ordinary Chrome injection failed; remote targets will still be attempted: %v\n", injectErr)
 		} else if !common.JSON {
-			fmt.Fprintf(os.Stderr, "agentcookie source: injected %d cookies into ordinary Chrome\n", localResult.Cookies)
+			fmt.Fprintf(os.Stderr, "agentcookie source: injected %d cookies into ordinary Chrome (mode=%s, restarted=%v)\n", localResult.Cookies, localResult.Mode, localResult.Restarted)
 		}
 	}
 

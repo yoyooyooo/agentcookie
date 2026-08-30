@@ -307,16 +307,18 @@ func TestSourcePushInjectsConfiguredOrdinaryChromeAndRemoteTarget(t *testing.T) 
 	})
 	fx.cfg.RealChrome = config.RealChromeRef{
 		Enabled:      true,
+		Mode:         config.RealChromeModeOffline,
+		Profile:      "Default",
 		AutoApprove:  true,
 		DomainFilter: []string{"%.facebook.com"},
 	}
 	var injected []chrome.Cookie
 	restore := SetRealChromeInjectorForTesting(func(_ context.Context, opts realchrome.Options, cookies []chrome.Cookie) (realchrome.Result, error) {
-		if !opts.AutoApprove {
-			t.Error("AutoApprove = false")
+		if !opts.AutoApprove || opts.Mode != config.RealChromeModeOffline || opts.Profile != "Default" {
+			t.Errorf("options = %+v", opts)
 		}
 		injected = append([]chrome.Cookie(nil), cookies...)
-		return realchrome.Result{Cookies: len(cookies), Port: 9222}, nil
+		return realchrome.Result{Mode: "offline", Cookies: len(cookies), Restarted: true}, nil
 	})
 	defer restore()
 

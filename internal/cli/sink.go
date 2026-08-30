@@ -350,7 +350,7 @@ func newSinkMux(
 			if ordinaryChromeErr != nil {
 				fmt.Fprintf(os.Stderr, "agentcookie sink: ordinary Chrome injection failed (sidecar write succeeded): %v\n", ordinaryChromeErr)
 			} else {
-				fmt.Fprintf(os.Stderr, "agentcookie sink: ordinary Chrome injection pushed %d cookies on loopback port %d\n", ordinaryChromeResult.Cookies, ordinaryChromeResult.Port)
+				fmt.Fprintf(os.Stderr, "agentcookie sink: ordinary Chrome injection pushed %d cookies (mode=%s, restarted=%v, port=%d)\n", ordinaryChromeResult.Cookies, ordinaryChromeResult.Mode, ordinaryChromeResult.Restarted, ordinaryChromeResult.Port)
 			}
 		}
 
@@ -435,8 +435,10 @@ func newSinkMux(
 			}
 			sinkState.RealChrome.LastInjectAt = time.Now().UTC()
 			sinkState.RealChrome.LastCookies = ordinaryChromeResult.Cookies
+			sinkState.RealChrome.Mode = ordinaryChromeResult.Mode
 			sinkState.RealChrome.Port = ordinaryChromeResult.Port
 			sinkState.RealChrome.ApprovalClicked = ordinaryChromeResult.ApprovalClicked
+			sinkState.RealChrome.Restarted = ordinaryChromeResult.Restarted
 			if ordinaryChromeErr != nil {
 				sinkState.RealChrome.LastError = ordinaryChromeErr.Error()
 				sinkState.RealChrome.TotalFailures++
@@ -478,7 +480,7 @@ func newSinkMux(
 			case ordinaryChromeErr != nil:
 				okLine += fmt.Sprintf("; real_chrome: FAILED: %v", ordinaryChromeErr)
 			case ordinaryChromeResult.Cookies > 0:
-				okLine += fmt.Sprintf("; real_chrome: injected %d cookies on loopback port %d", ordinaryChromeResult.Cookies, ordinaryChromeResult.Port)
+				okLine += fmt.Sprintf("; real_chrome: injected %d cookies (mode=%s, restarted=%v, port=%d)", ordinaryChromeResult.Cookies, ordinaryChromeResult.Mode, ordinaryChromeResult.Restarted, ordinaryChromeResult.Port)
 			case len(cookies) == 0:
 				okLine += "; real_chrome: no cookies to inject"
 			}

@@ -723,6 +723,7 @@ browser:
   name: dia
 real_chrome:
   enabled: true
+  mode: offline
   user_data_dir: ~/Library/Application Support/Google/Chrome
   auto_approve: true
   domain_filter:
@@ -732,7 +733,7 @@ real_chrome:
 	if err != nil {
 		t.Fatalf("LoadSource: %v", err)
 	}
-	if !cfg.RealChrome.Enabled || !cfg.RealChrome.AutoApprove {
+	if !cfg.RealChrome.Enabled || !cfg.RealChrome.AutoApprove || cfg.RealChrome.Mode != RealChromeModeOffline || cfg.RealChrome.Profile != "Default" {
 		t.Fatalf("RealChrome = %+v", cfg.RealChrome)
 	}
 	if strings.HasPrefix(cfg.RealChrome.UserDataDir, "~") {
@@ -754,6 +755,23 @@ real_chrome:
 `)
 	_, err := LoadSink(dir)
 	if err == nil || !strings.Contains(err.Error(), "real_chrome.domain_filter") {
+		t.Fatalf("LoadSink error = %v", err)
+	}
+}
+
+func TestLoadSinkRealChromeRejectsInvalidMode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "sink.yaml", `
+listen:
+  addr: 100.80.229.80:9999
+peer:
+  hostname: source
+real_chrome:
+  enabled: true
+  mode: magic
+`)
+	_, err := LoadSink(dir)
+	if err == nil || !strings.Contains(err.Error(), "real_chrome.mode") {
 		t.Fatalf("LoadSink error = %v", err)
 	}
 }

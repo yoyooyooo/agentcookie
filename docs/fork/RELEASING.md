@@ -49,8 +49,12 @@ is explicit:
 
 - when fork-owned Developer ID variables and Secrets are complete, CI signs and
   notarizes every Darwin binary;
-- when no signing identity is configured, CI ad-hoc signs the binaries and
-  records `signingMode: adhoc` plus `notarized: false` in the release manifest;
+- when no signing identity is configured, CI ad-hoc signs the binaries with the
+  stable identifier `io.github.yoyooyooo.agentcookie` and records
+  `signingMode: adhoc`, `codesignIdentifier`, plus `notarized: false` in the
+  release manifest; the stable designated requirement prevents every release
+  revision from appearing as a different application to macOS firewall/privacy
+  policy (the first direct-listener install can still require one approval);
 - a partially configured Developer ID mode fails closed and never downgrades.
 
 Expected assets:

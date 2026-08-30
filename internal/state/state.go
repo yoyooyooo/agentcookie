@@ -79,10 +79,12 @@ type LiveCDPState struct {
 // values or the browser-level websocket token.
 type RealChromeState struct {
 	Enabled         bool      `json:"enabled"`
+	Mode            string    `json:"mode,omitempty"`
 	Port            int       `json:"port,omitempty"`
 	LastInjectAt    time.Time `json:"last_inject_at,omitempty"`
 	LastCookies     int       `json:"last_cookies,omitempty"`
 	ApprovalClicked bool      `json:"approval_clicked,omitempty"`
+	Restarted       bool      `json:"restarted,omitempty"`
 	LastError       string    `json:"last_error,omitempty"`
 	TotalInjects    int       `json:"total_injects"`
 	TotalFailures   int       `json:"total_failures"`

@@ -1,5 +1,28 @@
 # Changelog
 
+## [fork-v1.1.0-r6] - 2026-08-30
+
+### Ordinary Google Chrome delivery
+
+- Added unattended `real_chrome.mode: offline` delivery for source and macOS
+  sink roles. Chrome is stopped only while its database is unlocked and is
+  relaunched only when it was running before the sync.
+- Added a Chrome-specific host-bound writer that preserves schema version 24;
+  Facebook and Xiaohongshu authentication now survives a real Chrome cold load.
+- Added `agentcookie chrome disable` so operators moving from live to offline
+  mode can remove the no-longer-needed debugging endpoint.
+- Added a stable Darwin codesign identifier and designated requirement so
+  ad-hoc release revisions retain one macOS firewall/privacy identity.
+
+## [fork-v1.1.0-r5] - 2026-08-30
+
+### Ordinary Chrome live mode
+
+- Added the explicit `real_chrome` source/sink surface and `agentcookie chrome`
+  commands.
+- The live mode works where Chrome's connection approval dialog is visible;
+  unattended/windowless macOS operation is superseded by r6 offline mode.
+
 ## [fork-v1.1.0-r4] - 2026-08-30
 
 ### Release distribution

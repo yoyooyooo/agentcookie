@@ -187,10 +187,10 @@ var statusCmd = &cobra.Command{
 				if !rc.LastInjectAt.IsZero() {
 					rcAgo = time.Since(rc.LastInjectAt).Round(time.Second).String() + " ago"
 				}
-				fmt.Printf("    real_chrome: port=%d, %d injects, %d failures, last inject %s\n",
-					rc.Port, rc.TotalInjects, rc.TotalFailures, rcAgo)
+				fmt.Printf("    real_chrome: mode=%s, port=%d, %d injects, %d failures, last inject %s\n",
+					rc.Mode, rc.Port, rc.TotalInjects, rc.TotalFailures, rcAgo)
 				if rc.LastCookies > 0 {
-					fmt.Printf("      last inject: %d cookies into ordinary Chrome\n", rc.LastCookies)
+					fmt.Printf("      last inject: %d cookies into ordinary Chrome (restarted=%v)\n", rc.LastCookies, rc.Restarted)
 				}
 				if rc.LastError != "" {
 					fmt.Printf("      last error: %s\n", rc.LastError)

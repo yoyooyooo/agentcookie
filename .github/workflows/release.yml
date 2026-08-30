@@ -174,6 +174,7 @@ jobs:
         env:
           AGENTCOOKIE_RELEASE_VERSION: ${{ needs.prepare.outputs.release_version }}
           AGENTCOOKIE_DARWIN_RELEASE_MODE: ${{ steps.signing.outputs.mode }}
+          AGENTCOOKIE_CODESIGN_IDENTIFIER: io.github.yoyooyooo.agentcookie
           AGENTCOOKIE_SIGN_IDENTITY: ${{ vars.AGENTCOOKIE_SIGN_IDENTITY }}
           AGENTCOOKIE_NOTARY_PROFILE: agentcookie-fork-notary
           GORELEASER_CURRENT_TAG: ${{ needs.prepare.outputs.semver_tag }}
@@ -185,8 +186,9 @@ jobs:
           jq -n \
             --arg version "${{ needs.prepare.outputs.release_version }}" \
             --arg mode "${{ steps.signing.outputs.mode }}" \
+            --arg identifier "io.github.yoyooyooo.agentcookie" \
             --argjson notarized "${{ steps.signing.outputs.notarized }}" \
-            '{platform:"darwin", version:$version, signingMode:$mode, notarized:$notarized, builder:"github-actions/goreleaser-v2"}' \
+            '{platform:"darwin", version:$version, signingMode:$mode, codesignIdentifier:$identifier, notarized:$notarized, builder:"github-actions/goreleaser-v2"}' \
             > dist/darwin-build.json
 
       - name: upload Darwin artifacts

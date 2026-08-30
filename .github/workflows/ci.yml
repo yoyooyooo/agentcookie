@@ -27,6 +27,12 @@ jobs:
         run: go test -race ./...
       - name: go build
         run: go build ./...
+      - name: stable ad-hoc signing identifier
+        run: |
+          go build -o /tmp/agentcookie-signing-test ./cmd/agentcookie
+          AGENTCOOKIE_SIGN_MODE=adhoc scripts/sign.sh /tmp/agentcookie-signing-test
+          codesign -d --verbose=4 /tmp/agentcookie-signing-test 2>&1 | grep -Fx 'Identifier=io.github.yoyooyooo.agentcookie'
+          codesign -d -r- /tmp/agentcookie-signing-test 2>&1 | grep -F 'designated => identifier "io.github.yoyooyooo.agentcookie"'
       - name: install agent-browser integration dependency
         run: |
           npm install -g agent-browser@0.33.0

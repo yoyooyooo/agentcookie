@@ -346,25 +346,28 @@ agentcookie wizard install --as sink \
   --pair-url http://<source-mac>:9998/pair
 ```
 
-To deliver into that machine's ordinary Google Chrome Default profile, enable
-Chrome's loopback endpoint once and select the explicit surface:
-
-```bash
-agentcookie chrome enable
-```
+To deliver into that machine's ordinary Google Chrome profile, select the
+explicit unattended mode:
 
 ```yaml
 # sink.yaml
 skip_chrome_sqlite: true
 real_chrome:
   enabled: true
-  auto_approve: true
+  mode: offline
+  profile: Default
 ```
+
+Offline mode gracefully stops Chrome only when it was already running, writes
+Chrome 127+'s host-bound Cookie shape while the database is unlocked, and then
+restores Chrome's prior running state. It neither launches a second browser nor
+uses the legacy sink SQLite format. Live mode remains available for visible
+desktops: run `agentcookie chrome enable`, set `mode: live`, and approve Chrome's
+local debugging dialog.
 
 A source Mac can use the same `real_chrome` block in `source.yaml`, for example
 when Dia is the authoritative browser and ordinary Chrome is a local consumer.
-The sync cycle writes through live Chrome, not SQLite, and does not launch a
-second browser. See [Ordinary Google Chrome delivery](docs/ordinary-chrome.md).
+See [Ordinary Google Chrome delivery](docs/ordinary-chrome.md).
 
 Legacy macOS SQLite and managed-profile modes remain available for existing
 installations. See [docs/quickstart.md](docs/quickstart.md) for the full
@@ -402,7 +405,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Working today
 
-- Live injection into the user's ordinary Google Chrome Default profile on macOS (`real_chrome`)
+- Ordinary Google Chrome profile delivery on macOS (`real_chrome`: unattended offline or user-approved live mode)
 - On-demand injection into one named, isolated Agent Browser session
 - One source to many independently paired sinks, with optional target policies
 - Mac to Linux continuous sync via Tailscale `/sync`

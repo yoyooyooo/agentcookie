@@ -19,7 +19,7 @@ else
   (cd "$fixture" && shasum -a 256 ./*.tar.gz | sed 's#  \./#  #' > checksums.txt)
 fi
 
-jq -n '{platform:"darwin",version:"fork-v1.1.0-r4",signingMode:"adhoc",notarized:false,builder:"test"}' > "$fixture/darwin-build.json"
+jq -n '{platform:"darwin",version:"fork-v1.1.0-r4",signingMode:"adhoc",codesignIdentifier:"io.github.yoyooyooo.agentcookie",notarized:false,builder:"test"}' > "$fixture/darwin-build.json"
 jq -n '{platform:"linux",version:"fork-v1.1.0-r4",signingMode:"unsigned",notarized:false,builder:"test"}' > "$fixture/linux-build.json"
 
 "$repo_root/scripts/generate-release-manifest.sh" "$tag" "$source_sha" "$fixture"
@@ -27,7 +27,7 @@ jq -n '{platform:"linux",version:"fork-v1.1.0-r4",signingMode:"unsigned",notariz
 jq -e \
   --arg tag "$tag" \
   --arg source_sha "$source_sha" \
-  '.tag == $tag and .sourceSha == $source_sha and (.artifacts | length) == 4 and .builds.darwin.signingMode == "adhoc"' \
+  '.tag == $tag and .sourceSha == $source_sha and (.artifacts | length) == 4 and .builds.darwin.signingMode == "adhoc" and .builds.darwin.codesignIdentifier == "io.github.yoyooyooo.agentcookie"' \
   "$fixture/release-manifest.json" >/dev/null
 
 if "$repo_root/scripts/generate-release-manifest.sh" "v1.1.0" "$source_sha" "$fixture" >/dev/null 2>&1; then

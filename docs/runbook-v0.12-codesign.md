@@ -49,6 +49,12 @@ Every subsequent rebuild matches the same ACL entry without a prompt.
   (`.github/workflows/release.yml`) imports the cert from the
   `CERTIFICATE_OSX_APPLICATION` secret on every tagged release.
 
+Fork releases without a Developer ID use an explicit ad-hoc mode with the
+stable identifier `io.github.yoyooyooo.agentcookie` and a stable designated
+requirement. A direct-listening macOS service can require one firewall approval
+on the first such install, but later releases retain the same application
+identity instead of reverting to a content-hash-only requirement.
+
 ## Verify on the build machine
 
 The Developer ID Application cert should already be installed.

@@ -1,45 +1,70 @@
 # Ordinary Google Chrome delivery
 
 `real_chrome` delivers a source or sink Cookie set into the user's normal
-Google Chrome Default profile. It is a separate surface from an externally
-managed automation browser (`live_cdp`) and from one isolated Agent Browser
-session (`agent-browser inject`).
+Google Chrome profile. It is distinct from an externally managed automation
+browser (`live_cdp`) and from one isolated Agent Browser session
+(`agent-browser inject`).
 
-## Properties
+## Modes
 
-- Uses the existing `/Applications/Google Chrome.app` process and Default
-  profile.
-- Writes through Chrome's live DevTools endpoint. It never edits Chrome's
-  Cookie SQLite database.
-- Does not launch a second browser or a second profile.
-- Chrome applies Cookie validation and performs its own persistence.
-- The endpoint binds to loopback. Any same-user local process can control an
-  enabled debugging browser, so only enable this on a single-user trusted
-  machine.
+### Offline mode
 
-## Prepare Chrome once
+Offline mode is the unattended path for an always-on workstation or macOS
+sink:
 
-On macOS:
+1. Detect whether Google Chrome is running.
+2. If running, request a normal quit and fall back to `SIGTERM` only when a
+   modal UI prevents AppleScript from completing.
+3. Write Chrome 127+'s host-bound plaintext shape
+   (`SHA256(host_key) || value`) under the destination Chrome Safe Storage key.
+4. Preserve Chrome's own Cookie schema version.
+5. Relaunch Chrome only when it was running before the sync.
+
+Chrome is never running while its Cookie database is open. The write is one
+SQLite transaction, and Chrome performs its normal validation on the next
+load. This mode starts no second browser and needs no debugging endpoint.
+
+```yaml
+real_chrome:
+  enabled: true
+  mode: offline
+  profile: Default
+```
+
+A sync can briefly restart an active Chrome. Schedule recurring source pushes
+at an appropriate time for interactive workstations.
+
+### Live mode
+
+Live mode writes through Chrome's DevTools endpoint and never opens the Cookie
+database. It requires a visible Chrome permission dialog when a client
+connects, so it is appropriate only where a user can approve that UI.
+
+Prepare Chrome once:
 
 ```bash
-agentcookie chrome status --json
 agentcookie chrome enable
 agentcookie chrome status --json
 ```
 
-`chrome enable` gracefully quits and relaunches Google Chrome once. It sets
-Chrome's persisted `devtools.remote_debugging.user-enabled` preference and
-waits for `DevToolsActivePort`. Existing windows remain Chrome-owned and are
-restored by Chrome.
+Then configure:
 
-Chrome can show a local "Allow remote debugging" dialog when agentcookie
-connects. `auto_approve: true` uses macOS Accessibility to approve that Chrome
-UI. The caller must already have Accessibility permission; otherwise leave it
-false and approve the dialog manually.
+```yaml
+real_chrome:
+  enabled: true
+  mode: live
+  auto_approve: true
+```
+
+`auto_approve` uses macOS Accessibility and is best effort. Chrome's permission
+model remains authoritative; an environment with no visible browser window
+should use offline mode. After switching from live to offline mode, remove the
+no-longer-needed endpoint with `agentcookie chrome disable`.
 
 ## Source machine
 
-A source can also consume its own authoritative browser identity:
+A source can consume its own authoritative browser identity. For example, Dia
+can remain the source of truth while ordinary Chrome receives the same set:
 
 ```yaml
 # ~/.config/agentcookie/source.yaml
@@ -49,53 +74,64 @@ browser:
 
 real_chrome:
   enabled: true
-  auto_approve: true
+  mode: offline
+  profile: Default
 ```
 
-Each `agentcookie source --once` or `--watch` cycle injects the source-policy
-Cookie set into ordinary Chrome and independently attempts every configured
-remote target. A local injection failure does not prevent remote targets from
-being attempted, but the source command exits non-zero so the failure is
-observable.
+Each `agentcookie source --once` or `--watch` cycle attempts local ordinary
+Chrome delivery and independently attempts every configured remote target. A
+local failure does not prevent remote attempts, but the source command exits
+non-zero so the failure remains observable.
 
 ## Sink machine
 
-A macOS sink can receive through the normal encrypted source/sink protocol and
-then deliver locally:
+A macOS sink can receive through the encrypted source/sink protocol and then
+deliver locally:
 
 ```yaml
 # ~/.config/agentcookie/sink.yaml
 skip_chrome_sqlite: true
 real_chrome:
   enabled: true
-  auto_approve: true
+  mode: offline
+  profile: Default
 ```
 
-The sink first materializes the official sidecar, then injects ordinary Chrome.
-The `/sync` response and `agentcookie status --json` report the value-free
-result. Sidecar success remains durable even if Chrome is temporarily closed.
-The next source push retries delivery.
+The sink materializes the official sidecar first, then updates ordinary
+Chrome. Keep `skip_chrome_sqlite: true`: `real_chrome.mode: offline` owns the
+bounded host-bound write and must not be combined with the legacy sink SQLite
+format. Sidecar success remains durable if Chrome delivery fails; the next
+source push retries.
 
 ## One-off injection
 
 ```bash
-agentcookie chrome inject --from source --domain facebook.com
-agentcookie chrome inject --from sink --domain facebook.com
+agentcookie chrome inject --mode offline --from source --domain facebook.com
+agentcookie chrome inject --mode offline --from sink --domain facebook.com
 ```
 
 `--domain` is repeatable. Configured `domain_filter` entries use SQLite-LIKE
 host patterns such as `example.com` and `%.example.com`. Empty means every
 Cookie that already passed the source or sink policy.
 
+## Security boundaries
+
+- Offline mode handles decrypted Cookie values in memory and writes only the
+  target Chrome's encrypted database under that Chrome's Keychain-derived key.
+- Live mode exposes full browser control on a loopback endpoint while enabled;
+  any same-user local process can attempt to connect, subject to Chrome's
+  approval UI.
+- Neither mode prints Cookie values. Status and sync responses report counts,
+  mode, restart state, and errors only.
+- Device-bound sessions such as Google DBSC cannot be transferred by either
+  mode.
+
 ## Verification
 
-Verify from the same ordinary Chrome profile, without printing Cookie values:
-
 ```bash
-agentcookie chrome status --json
 agentcookie status --json
 ```
 
-Then use the actual consumer attached to that Chrome, or navigate in a normal
-Chrome tab. Reaching an authenticated page is the acceptance signal; the
-presence of rows in a sidecar is not sufficient.
+Then use the actual consumer attached to ordinary Chrome or navigate in a
+normal Chrome tab. Reaching an authenticated page is the acceptance signal;
+rows in a sidecar or Cookie database alone are not sufficient.

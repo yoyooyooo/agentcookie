@@ -1,5 +1,6 @@
-// Package realchrome injects cookies into the user's running Google Chrome
-// Default profile through Chrome's user-approved remote-debugging endpoint.
+// Package realchrome delivers cookies into the user's ordinary Google Chrome
+// profile through either a user-approved live endpoint or an unattended,
+// host-bound write while Chrome is stopped.
 package realchrome
 
 import (
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -29,6 +31,13 @@ var (
 	ErrRemoteDebuggingDisabled = errors.New("realchrome: Chrome remote debugging is not enabled")
 	ErrStaleEndpoint           = errors.New("realchrome: Chrome remote-debugging endpoint is stale")
 	ErrApprovalUnavailable     = errors.New("realchrome: Chrome approval dialog could not be automated")
+
+	offlineChromeRunning       = chromeRunning
+	offlineStopChrome          = stopChrome
+	offlineLaunchChrome        = launchChrome
+	offlineWaitChromeRunning   = waitForChromeRunning
+	offlineSafeStoragePassword = chrome.SafeStoragePassword
+	offlineWriteCookies        = chrome.WriteCookiesForChrome
 )
 
 // Endpoint is Chrome's browser-level DevTools websocket endpoint.
@@ -41,18 +50,22 @@ func (e Endpoint) WebSocketURL() string {
 	return fmt.Sprintf("ws://127.0.0.1:%d%s", e.Port, e.WSPath)
 }
 
-// Options controls one live injection into the normal Chrome profile.
+// Options controls one delivery into the ordinary Chrome profile.
 type Options struct {
+	Mode        string
 	UserDataDir string
+	Profile     string
 	AutoApprove bool
 	Timeout     time.Duration
 }
 
 // Result is intentionally value-free so it is safe for status and logs.
 type Result struct {
-	Cookies         int  `json:"cookies"`
-	Port            int  `json:"port"`
-	ApprovalClicked bool `json:"approval_clicked"`
+	Mode            string `json:"mode"`
+	Cookies         int    `json:"cookies"`
+	Port            int    `json:"port,omitempty"`
+	ApprovalClicked bool   `json:"approval_clicked,omitempty"`
+	Restarted       bool   `json:"restarted,omitempty"`
 }
 
 // Status reports the ordinary Chrome profile's debugging posture.
@@ -172,11 +185,11 @@ func Enable(ctx context.Context, userDataDir string, restart bool) (Status, erro
 		return Status{}, fmt.Errorf("realchrome: Chrome is running; allow restart or quit Chrome before enabling remote debugging")
 	}
 	if running {
-		if err := quitChrome(ctx, 20*time.Second); err != nil {
+		if err := stopChrome(ctx, 20*time.Second); err != nil {
 			return Status{}, err
 		}
 	}
-	if err := setRemoteDebuggingPreference(userDataDir); err != nil {
+	if err := setRemoteDebuggingPreference(userDataDir, true); err != nil {
 		return Status{}, err
 	}
 	if !restart {
@@ -191,12 +204,61 @@ func Enable(ctx context.Context, userDataDir string, restart bool) (Status, erro
 	return Inspect(ctx, userDataDir)
 }
 
-// Inject writes cookies into the running ordinary Chrome profile. Chrome
-// performs its own persistence; agentcookie never edits Chrome SQLite here.
+// Disable turns off Chrome's persisted remote-debugging preference and
+// restores Chrome only when it was running before the change.
+func Disable(ctx context.Context, userDataDir string, restart bool) (Status, error) {
+	if runtime.GOOS != "darwin" {
+		return Status{}, fmt.Errorf("realchrome: automatic disable is supported on macOS only")
+	}
+	userDataDir = ResolveUserDataDir(userDataDir)
+	running, err := chromeRunning(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	if running && !restart {
+		return Status{}, fmt.Errorf("realchrome: Chrome is running; allow restart or quit Chrome before disabling remote debugging")
+	}
+	if running {
+		if err := stopChrome(ctx, 20*time.Second); err != nil {
+			return Status{}, err
+		}
+	}
+	if err := setRemoteDebuggingPreference(userDataDir, false); err != nil {
+		return Status{}, err
+	}
+	if err := os.Remove(filepath.Join(userDataDir, activePortFile)); err != nil && !os.IsNotExist(err) {
+		return Status{}, fmt.Errorf("realchrome: remove stale DevToolsActivePort: %w", err)
+	}
+	if running {
+		if err := launchChrome(ctx); err != nil {
+			return Status{}, err
+		}
+		if err := waitForChromeRunning(ctx, 15*time.Second); err != nil {
+			return Status{}, err
+		}
+	}
+	return Inspect(ctx, userDataDir)
+}
+
+// Inject writes cookies into the ordinary Chrome profile using the selected
+// delivery mode. Live mode uses Chrome's DevTools endpoint. Offline mode
+// writes Chrome's host-bound Cookie rows while Chrome is stopped and restores
+// the browser's prior running state.
 func Inject(parent context.Context, opts Options, cookies []chrome.Cookie) (Result, error) {
 	if len(cookies) == 0 {
 		return Result{}, nil
 	}
+	switch opts.Mode {
+	case "", "live":
+		return injectLive(parent, opts, cookies)
+	case "offline":
+		return injectOffline(parent, opts, cookies)
+	default:
+		return Result{}, fmt.Errorf("realchrome: unsupported mode %q", opts.Mode)
+	}
+}
+
+func injectLive(parent context.Context, opts Options, cookies []chrome.Cookie) (Result, error) {
 	userDataDir := ResolveUserDataDir(opts.UserDataDir)
 	ep, err := Discover(userDataDir)
 	if err != nil {
@@ -241,13 +303,77 @@ func Inject(parent context.Context, opts Options, cookies []chrome.Cookie) (Resu
 		return Result{}, fmt.Errorf("realchrome: inject into ordinary Chrome: %w", err)
 	}
 
-	result := Result{Cookies: len(cookies), Port: ep.Port}
+	result := Result{Mode: "live", Cookies: len(cookies), Port: ep.Port}
 	select {
 	case ar := <-approval:
 		result.ApprovalClicked = ar.clicked
 	default:
 	}
 	return result, nil
+}
+
+func injectOffline(parent context.Context, opts Options, cookies []chrome.Cookie) (result Result, retErr error) {
+	if runtime.GOOS != "darwin" {
+		return Result{}, fmt.Errorf("realchrome: offline mode is supported on macOS only")
+	}
+	userDataDir := ResolveUserDataDir(opts.UserDataDir)
+	profile := strings.TrimSpace(opts.Profile)
+	if profile == "" {
+		profile = "Default"
+	}
+	if profile == "." || profile == ".." || strings.ContainsAny(profile, `/\\`) {
+		return Result{}, fmt.Errorf("realchrome: invalid profile directory %q", profile)
+	}
+	cookiesPath := filepath.Join(userDataDir, profile, "Cookies")
+	if _, err := os.Stat(cookiesPath); err != nil {
+		return Result{}, fmt.Errorf("realchrome: ordinary Chrome Cookies database: %w", err)
+	}
+
+	wasRunning, err := offlineChromeRunning(parent)
+	if err != nil {
+		return Result{}, err
+	}
+	stopped := false
+	relaunched := false
+	if wasRunning {
+		if err := offlineStopChrome(parent, 20*time.Second); err != nil {
+			return Result{}, err
+		}
+		stopped = true
+	}
+	defer func() {
+		if !stopped || relaunched {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 15*time.Second)
+		defer cancel()
+		if err := offlineLaunchChrome(cleanupCtx); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
+
+	password, err := offlineSafeStoragePassword()
+	if err != nil {
+		return Result{}, fmt.Errorf("realchrome: read Chrome Safe Storage: %w", err)
+	}
+	key, err := chrome.DeriveAESKey(password)
+	if err != nil {
+		return Result{}, err
+	}
+	written, err := offlineWriteCookies(cookiesPath, cookies, key)
+	if err != nil {
+		return Result{}, fmt.Errorf("realchrome: write ordinary Chrome Cookie store: %w", err)
+	}
+	if wasRunning {
+		if err := offlineLaunchChrome(parent); err != nil {
+			return Result{}, err
+		}
+		relaunched = true
+		if err := offlineWaitChromeRunning(parent, 15*time.Second); err != nil {
+			return Result{}, err
+		}
+	}
+	return Result{Mode: "offline", Cookies: written, Restarted: wasRunning}, nil
 }
 
 func probeEndpoint(ctx context.Context, ep Endpoint) error {
@@ -293,6 +419,48 @@ func chromeRunning(ctx context.Context) (bool, error) {
 	return false, fmt.Errorf("realchrome: probe Google Chrome process: %w", err)
 }
 
+func stopChrome(ctx context.Context, timeout time.Duration) error {
+	attemptTimeout := 5 * time.Second
+	if timeout > 0 && timeout < attemptTimeout {
+		attemptTimeout = timeout
+	}
+	quitCtx, cancelQuit := context.WithTimeout(ctx, attemptTimeout)
+	quitErr := quitChrome(quitCtx, attemptTimeout)
+	cancelQuit()
+	if quitErr == nil {
+		return nil
+	}
+	out, err := exec.CommandContext(ctx, "/usr/bin/pgrep", "-x", "Google Chrome").Output()
+	if err != nil {
+		return fmt.Errorf("realchrome: locate Chrome for graceful SIGTERM fallback: %w", err)
+	}
+	for _, line := range strings.Fields(string(out)) {
+		pid, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return fmt.Errorf("realchrome: terminate Chrome pid %d: %w", pid, err)
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		running, err := chromeRunning(ctx)
+		if err != nil {
+			return err
+		}
+		if !running {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("realchrome: Chrome did not exit after SIGTERM within %s", timeout)
+}
+
 func quitChrome(ctx context.Context, timeout time.Duration) error {
 	cmd := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", `tell application "Google Chrome" to quit`)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -314,6 +482,25 @@ func quitChrome(ctx context.Context, timeout time.Duration) error {
 		}
 	}
 	return fmt.Errorf("realchrome: Chrome did not quit within %s", timeout)
+}
+
+func waitForChromeRunning(ctx context.Context, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		running, err := chromeRunning(ctx)
+		if err != nil {
+			return err
+		}
+		if running {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("realchrome: Chrome did not relaunch within %s", timeout)
 }
 
 func launchChrome(ctx context.Context) error {
@@ -352,7 +539,7 @@ func remoteDebuggingPreference(userDataDir string) (bool, error) {
 	return enabled, nil
 }
 
-func setRemoteDebuggingPreference(userDataDir string) error {
+func setRemoteDebuggingPreference(userDataDir string, enabled bool) error {
 	state, path, mode, err := readPreferenceMaps(userDataDir)
 	if err != nil {
 		return err
@@ -369,7 +556,7 @@ func setRemoteDebuggingPreference(userDataDir string) error {
 			return fmt.Errorf("realchrome: parse Local State remote_debugging: %w", err)
 		}
 	}
-	rd["user-enabled"] = json.RawMessage("true")
+	rd["user-enabled"] = json.RawMessage(strconv.FormatBool(enabled))
 	rdJSON, err := json.Marshal(rd)
 	if err != nil {
 		return err

@@ -112,13 +112,20 @@ type LiveCDPRef struct {
 	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"` // default http://127.0.0.1:9223
 }
 
+const (
+	RealChromeModeLive    = "live"
+	RealChromeModeOffline = "offline"
+)
+
 // RealChromeRef delivers cookies into the user's ordinary Google Chrome
-// Default profile. Chrome must first be prepared with `agentcookie chrome
-// enable`; writes then use its loopback DevTools endpoint and never edit
-// Chrome SQLite directly.
+// profile. Live mode uses Chrome's user-approved DevTools endpoint. Offline
+// mode gracefully stops a running Chrome, writes Chrome's host-bound Cookie
+// rows, and restores the prior running state.
 type RealChromeRef struct {
 	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	Mode         string   `yaml:"mode,omitempty" json:"mode,omitempty"`
 	UserDataDir  string   `yaml:"user_data_dir,omitempty" json:"user_data_dir,omitempty"`
+	Profile      string   `yaml:"profile,omitempty" json:"profile,omitempty"`
 	AutoApprove  bool     `yaml:"auto_approve,omitempty" json:"auto_approve,omitempty"`
 	DomainFilter []string `yaml:"domain_filter,omitempty" json:"domain_filter,omitempty"`
 }
@@ -330,7 +337,7 @@ func resolveSourcePaths(path string, cfg *SourceConfig) error {
 		cfg.Cmux.CmuxPath = ExpandTilde(cfg.Cmux.CmuxPath)
 	}
 	cfg.RealChrome.UserDataDir = ExpandTilde(cfg.RealChrome.UserDataDir)
-	if err := validateRealChrome(path, cfg.RealChrome); err != nil {
+	if err := resolveRealChrome(path, &cfg.RealChrome); err != nil {
 		return err
 	}
 	return nil
@@ -366,7 +373,7 @@ func LoadSink(dir string) (*SinkConfig, error) {
 		cfg.Cmux.CmuxPath = ExpandTilde(cfg.Cmux.CmuxPath)
 	}
 	cfg.RealChrome.UserDataDir = ExpandTilde(cfg.RealChrome.UserDataDir)
-	if err := validateRealChrome(path, cfg.RealChrome); err != nil {
+	if err := resolveRealChrome(path, &cfg.RealChrome); err != nil {
 		return nil, err
 	}
 	// Linux sink defaults: skip Chrome SQLite (no Keychain to read Safe Storage),
@@ -398,7 +405,22 @@ func applyLinuxSinkDefaults(cfg *SinkConfig) {
 	}
 }
 
-func validateRealChrome(path string, ref RealChromeRef) error {
+func resolveRealChrome(path string, ref *RealChromeRef) error {
+	if !ref.Enabled {
+		return nil
+	}
+	if ref.Mode == "" {
+		ref.Mode = RealChromeModeLive
+	}
+	if ref.Mode != RealChromeModeLive && ref.Mode != RealChromeModeOffline {
+		return fmt.Errorf("%s: real_chrome.mode must be %q or %q", path, RealChromeModeLive, RealChromeModeOffline)
+	}
+	if ref.Profile == "" {
+		ref.Profile = defaultBrowserProfile
+	}
+	if ref.Profile == "." || ref.Profile == ".." || strings.ContainsAny(ref.Profile, `/\\`) {
+		return fmt.Errorf("%s: real_chrome.profile must be a profile directory name", path)
+	}
 	for i, pattern := range ref.DomainFilter {
 		if strings.TrimSpace(pattern) == "" {
 			return fmt.Errorf("%s: real_chrome.domain_filter[%d] is empty", path, i)
