@@ -105,4 +105,37 @@ deltas:
       - go test ./...
       - go test -race ./pkg/sidecar ./internal/livecdp ./internal/cli
       - go vet ./...
-      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=1
+      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
+
+  - id: patched-go-toolchain
+    title: Build and test with the patched Go 1.26.6 standard library
+    category: fix
+    prior_commits: []
+    decision: keep
+    reason: Go 1.26.4 had six reachable standard-library vulnerabilities; 1.26.6 contains the official fixes.
+    evidence:
+      - go.mod
+      - govulncheck reports zero reachable vulnerabilities
+    dependencies: []
+    migration_impact: none
+    replay_branch: fix/go-1.26.6-v1.1.0
+    verification:
+      - go test -race ./...
+      - go vet ./...
+      - govulncheck ./...
+
+  - id: non-owning-browser-websocket-injection
+    title: Inject through browser-level CDP without taking ownership of Agent Browser pages
+    category: fix
+    prior_commits: []
+    decision: keep
+    reason: A chromedp page context closes its target during cleanup and can invalidate the Agent Browser daemon's retained page session. Direct browser WebSocket commands detach without closing any page.
+    evidence:
+      - internal/livecdp/browser_websocket.go
+      - internal/cli/agent_browser_e2e_test.go
+    dependencies: [named-agent-browser-session-injection, patched-go-toolchain]
+    migration_impact: none
+    replay_branch: fix/agent-browser-browser-level-cdp-v1.1.0
+    verification:
+      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
+      - go test -race ./...

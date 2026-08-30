@@ -53,9 +53,10 @@ agentcookie asks agent-browser for the selected session's browser WebSocket:
 agent-browser --session "$SESSION" get cdp-url --json
 ```
 
-It converts that WebSocket to the session's dynamic local CDP endpoint and
-uses `Storage.setCookies` against every BrowserContext in that browser. No
-fixed debug port is required, so concurrent sessions cannot collide.
+It connects directly to that browser-level WebSocket and uses
+`Storage.setCookies` against every BrowserContext in that browser. It does not
+create, attach to, own, or close a page target. No fixed debug port is required,
+so concurrent sessions cannot collide.
 
 Only loopback CDP hosts (`127.0.0.1`, `::1`, or `localhost`) are accepted. A
 remote or Tailnet CDP endpoint is rejected even when reachable.

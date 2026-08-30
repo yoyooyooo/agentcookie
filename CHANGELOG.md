@@ -10,7 +10,11 @@
   consume the latest official sidecar with full cookie metadata.
 - Inactive sessions start on `about:blank`, dynamic CDP ports are discovered
   through agent-browser, and non-loopback CDP endpoints are rejected.
-- The optional real-browser E2E is validated against agent-browser 0.33.0.
+- Injection uses browser-level WebSocket commands and never owns or closes the
+  Agent Browser daemon's page target.
+- The optional real-browser E2E is validated repeatedly against agent-browser 0.33.0.
+- The fork requires Go 1.26.6, which clears the reachable standard-library
+  vulnerabilities reported against the upstream 1.26.4 baseline.
 
 ### Source fan-out
 
