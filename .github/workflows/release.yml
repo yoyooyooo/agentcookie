@@ -64,7 +64,7 @@ jobs:
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           set -euo pipefail
-          git tag -a "$SEMVER_TAG" -m "Ephemeral GoReleaser view for $GITHUB_REF_NAME" "$SOURCE_SHA"
+          git tag "$SEMVER_TAG" "$SOURCE_SHA"
           [[ "$(git rev-list -n 1 "$SEMVER_TAG")" == "$SOURCE_SHA" ]]
 
       - name: install arm64 cross-compiler
@@ -119,7 +119,7 @@ jobs:
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           set -euo pipefail
-          git tag -a "$SEMVER_TAG" -m "Ephemeral GoReleaser view for $GITHUB_REF_NAME" "$SOURCE_SHA"
+          git tag "$SEMVER_TAG" "$SOURCE_SHA"
           [[ "$(git rev-list -n 1 "$SEMVER_TAG")" == "$SOURCE_SHA" ]]
 
       - id: signing
