@@ -273,6 +273,29 @@ deltas:
       - GitHub release run 33301650124
       - public Release asset download and sha256sum verification
 
+  - id: ordinary-google-chrome-delivery
+    title: Deliver source or sink identity into the user's normal Google Chrome Default profile
+    category: feature
+    prior_commits: []
+    decision: keep
+    reason: The current generation delivered to remote automation Chrome and isolated Agent Browser sessions but had no explicit consumer for the ordinary Chrome profile used by desktop browser-control tools.
+    accepted_commits:
+      - 2ea8a70ce60c7dca27d931cc7148e2578b33c3a0
+    evidence:
+      - internal/realchrome/realchrome.go
+      - internal/cli/chrome.go
+      - internal/cli/source_test.go
+      - internal/cli/sink_test.go
+      - docs/ordinary-chrome.md
+    dependencies: [dia-source-adapter, source-fanout]
+    migration_impact: run agentcookie chrome enable once; configure real_chrome on each intended source or macOS sink; remove automation-browser live_cdp when it was an accidental target
+    replay_branch: feature/real-chrome-sync-v1.1.0
+    verification:
+      - go test ./...
+      - go test -race ./...
+      - go vet ./...
+      - Mini ordinary Google Chrome 149 reached the authenticated Tailscale DNS console after live injection; Fortress and temporary Agent Browser processes were excluded
+
 release_tags:
   - name: fork-v1.1.0-r1
     tag_object_sha: c57ff47521b8ba9528547c67e23914781a1dd289
