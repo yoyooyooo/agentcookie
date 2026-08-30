@@ -254,7 +254,7 @@ func boolInt(value bool) int {
 type agentBrowserRunner func(ctx context.Context, binary string, args ...string) ([]byte, error)
 
 var runAgentBrowser = execAgentBrowser
-var injectAgentBrowserCDP = livecdp.AttachAndInject
+var injectAgentBrowserCDP = livecdp.InjectBrowserWebSocket
 
 func execAgentBrowser(ctx context.Context, binary string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -306,11 +306,11 @@ func injectNamedAgentBrowserSession(ctx context.Context, opts agentBrowserInject
 	if err != nil {
 		return result, err
 	}
-	endpoint, err := loopbackCDPEndpoint(wsURL)
+	wsURL, err = loopbackCDPWebSocket(wsURL)
 	if err != nil {
 		return result, err
 	}
-	result.Contexts, err = injectAgentBrowserCDP(ctx, endpoint, cookies)
+	result.Contexts, err = injectAgentBrowserCDP(ctx, wsURL, cookies)
 	if err != nil {
 		return result, fmt.Errorf("agent-browser inject: inject session %q: %w", opts.Session, err)
 	}
@@ -361,7 +361,7 @@ func agentBrowserSessionCDPURL(ctx context.Context, binary, session string) (str
 	return response.Data.CDPURL, nil
 }
 
-func loopbackCDPEndpoint(raw string) (string, error) {
+func loopbackCDPWebSocket(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", fmt.Errorf("agent-browser inject: parse CDP URL: %w", err)
@@ -377,9 +377,8 @@ func loopbackCDPEndpoint(raw string) (string, error) {
 	if u.Port() == "" {
 		return "", fmt.Errorf("agent-browser inject: CDP URL has no port")
 	}
-	scheme := "http"
-	if u.Scheme == "wss" {
-		scheme = "https"
+	if !strings.HasPrefix(u.Path, "/devtools/browser/") {
+		return "", fmt.Errorf("agent-browser inject: expected a browser-level CDP WebSocket")
 	}
-	return scheme + "://" + u.Host, nil
+	return u.String(), nil
 }

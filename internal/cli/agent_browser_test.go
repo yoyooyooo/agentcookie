@@ -83,22 +83,23 @@ domains: []
 	}
 }
 
-func TestLoopbackCDPEndpoint(t *testing.T) {
+func TestLoopbackCDPWebSocket(t *testing.T) {
 	tests := []struct {
 		raw     string
 		want    string
 		wantErr bool
 	}{
-		{raw: "ws://127.0.0.1:62606/devtools/browser/id", want: "http://127.0.0.1:62606"},
-		{raw: "ws://[::1]:9222/devtools/browser/id", want: "http://[::1]:9222"},
-		{raw: "wss://localhost:9443/devtools/browser/id", want: "https://localhost:9443"},
+		{raw: "ws://127.0.0.1:62606/devtools/browser/id", want: "ws://127.0.0.1:62606/devtools/browser/id"},
+		{raw: "ws://[::1]:9222/devtools/browser/id", want: "ws://[::1]:9222/devtools/browser/id"},
+		{raw: "wss://localhost:9443/devtools/browser/id", want: "wss://localhost:9443/devtools/browser/id"},
 		{raw: "ws://100.101.1.2:9222/devtools/browser/id", wantErr: true},
 		{raw: "http://127.0.0.1:9222/json/version", wantErr: true},
 		{raw: "ws://127.0.0.1/devtools/browser/id", wantErr: true},
+		{raw: "ws://127.0.0.1:9222/devtools/page/id", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
-			got, err := loopbackCDPEndpoint(tt.raw)
+			got, err := loopbackCDPWebSocket(tt.raw)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got %q", got)
@@ -128,9 +129,9 @@ func TestInjectNamedAgentBrowserSessionStartsAndTargetsExactSession(t *testing.T
 				return nil, fmt.Errorf("unexpected args %v", args)
 			}
 		},
-		func(_ context.Context, endpoint string, cookies []chrome.Cookie) (int, error) {
-			if endpoint != "http://127.0.0.1:62606" || len(cookies) != 1 {
-				t.Fatalf("inject endpoint=%q cookies=%d", endpoint, len(cookies))
+		func(_ context.Context, wsURL string, cookies []chrome.Cookie) (int, error) {
+			if wsURL != "ws://127.0.0.1:62606/devtools/browser/id" || len(cookies) != 1 {
+				t.Fatalf("inject wsURL=%q cookies=%d", wsURL, len(cookies))
 			}
 			return 1, nil
 		},
