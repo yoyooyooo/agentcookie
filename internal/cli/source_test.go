@@ -206,12 +206,12 @@ domains:
 
 func TestSourcePushFanoutSealsAndFiltersPerTarget(t *testing.T) {
 	fx := newSourcePushFixture(t, []chrome.Cookie{
-		{HostKey: ".tailscale.com", Name: "session", Value: "value", Path: "/"},
-		{HostKey: ".example.com", Name: "other", Value: "value", Path: "/"},
+		{HostKey: ".account.example", Name: "session", Value: "value", Path: "/"},
+		{HostKey: ".other.example", Name: "other", Value: "value", Path: "/"},
 	})
 	capture := newSourceCaptureForHosts(t, map[string]string{
-		"mini.test":  "mini-target-secret",
-		"other.test": "other-target-secret",
+		"restricted.test": "restricted-target-secret",
+		"full.test":       "full-target-secret",
 	})
 	http.DefaultTransport = capture
 	restoreResolver := SetResolveSinkURLForTesting(func(_ context.Context, rawURL string) (string, error) {
@@ -219,14 +219,14 @@ func TestSourcePushFanoutSealsAndFiltersPerTarget(t *testing.T) {
 	})
 	defer restoreResolver()
 
-	miniPolicy := &config.Blocklist{
+	restrictedPolicy := &config.Blocklist{
 		Version: 1,
 		Policy:  config.CookiePolicyAllowlist,
-		Domains: []config.BlocklistEntry{{Pattern: "%.tailscale.com"}},
+		Domains: []config.BlocklistEntry{{Pattern: "%.account.example"}},
 	}
 	n, _, err := pushOnce(context.Background(), fx.cfg, &config.Blocklist{Version: 1}, fx.key, []sourcePushTarget{
-		{Name: "mini", URL: "http://mini.test/sync", Secret: "mini-target-secret", Policy: miniPolicy},
-		{Name: "other", URL: "http://other.test/sync", Secret: "other-target-secret"},
+		{Name: "restricted", URL: "http://restricted.test/sync", Secret: "restricted-target-secret", Policy: restrictedPolicy},
+		{Name: "full", URL: "http://full.test/sync", Secret: "full-target-secret"},
 	}, false, false, false)
 	if err != nil {
 		t.Fatalf("fanout push: %v", err)
@@ -234,11 +234,11 @@ func TestSourcePushFanoutSealsAndFiltersPerTarget(t *testing.T) {
 	if n != 2 || capture.batchCount() != 2 {
 		t.Fatalf("fanout result cookies=%d batches=%d", n, capture.batchCount())
 	}
-	if got := hostsFromChromeCookies(capture.batchAt(0)); !reflect.DeepEqual(got, []string{".tailscale.com"}) {
-		t.Fatalf("mini target hosts=%v", got)
+	if got := hostsFromChromeCookies(capture.batchAt(0)); !reflect.DeepEqual(got, []string{".account.example"}) {
+		t.Fatalf("restricted target hosts=%v", got)
 	}
-	if got := hostsFromChromeCookies(capture.batchAt(1)); !reflect.DeepEqual(got, []string{".example.com", ".tailscale.com"}) {
-		t.Fatalf("other target hosts=%v", got)
+	if got := hostsFromChromeCookies(capture.batchAt(1)); !reflect.DeepEqual(got, []string{".account.example", ".other.example"}) {
+		t.Fatalf("full target hosts=%v", got)
 	}
 }
 

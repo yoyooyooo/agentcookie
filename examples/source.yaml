@@ -1,26 +1,26 @@
 # Example source.yaml. Copy to ~/.config/agentcookie/source.yaml on the
-# machine where you log in interactively (your laptop).
+# machine where you log in interactively.
 
 # Fan-out targets are independently paired. The map key is the name accepted by
 # `agentcookie source --target <name>`; omitting --target pushes to every enabled
 # target. MagicDNS hostnames are resolved through Tailscale at sync time, so the
 # source follows a target after re-auth gives it a new 100.x address.
 targets:
-  grok-bot:
-    url: http://grok-bot:9999/sync
-    peer: grok-bot
-  mini:
-    url: http://mini:9999/sync
-    peer: mini
+  full-sink:
+    url: http://full-sink:9999/sync
+    peer: full-sink
+  restricted-sink:
+    url: http://restricted-sink:9999/sync
+    peer: restricted-sink
     # Optional source-side least-privilege filter for this target. The sink
     # applies its own policy again after decrypting the envelope.
     policy: allowlist
     domains:
-      - pattern: "tailscale.com"
-      - pattern: "%.tailscale.com"
-  # parked-agent:
-  #   url: http://parked-agent:9999/sync
-  #   peer: parked-agent
+      - pattern: "example.com"
+      - pattern: "%.example.com"
+  # parked-sink:
+  #   url: http://parked-sink:9999/sync
+  #   peer: parked-sink
   #   disabled: true
 
 # Optional source browser adapter. Omit for Google Chrome. Supported: chrome,
@@ -37,9 +37,9 @@ browser:
 # Legacy single-target source.yaml files remain supported. Use `sink` + `peer`
 # instead of `targets`, never both:
 # sink:
-#   url: http://my-mac-mini:9999/sync
+#   url: http://single-sink:9999/sync
 # peer:
-#   hostname: my-mac-mini
+#   hostname: single-sink
 
 # Legacy security.shared_secret remains accepted only for the legacy single
 # target. Fan-out targets require one pairing-derived key per peer.

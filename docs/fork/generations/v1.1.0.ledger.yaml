@@ -97,7 +97,7 @@ deltas:
     category: feature
     prior_commits: []
     decision: keep
-    reason: All three operator machines require on-demand identity in independent temporary Agent Browser sessions; the user-facing capability remains while its r1/r2 transport is superseded.
+    reason: Source and sink operators need on-demand identity in independent temporary Agent Browser sessions; the user-facing capability remains while its r1/r2 transport is superseded.
     evidence:
       - docs/agent-browser-sessions.md
       - internal/cli/agent_browser_test.go
@@ -268,48 +268,28 @@ verification_runs:
   release_artifact: none
   release_api_readback: 404-not-found
 
-deployment_receipts:
-  - target: mini
-    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
-    tag: fork-v1.1.0-r3
-    artifact_sha256: c1194b294d3dc33e452fa4beebd855c96c9461e57346869c521f93b24ba41638
-    architecture: darwin-arm64
-    signing_status: ad-hoc-linker-signed-not-notarized
-    installed_path: /Users/yoyo/.local/bin/agentcookie
-    version_readback: fork-v1.1.0-r3
-    runtime_readback:
-      - com.yoyo.agentcookie-sink KeepAlive healthy on Tailnet port 9999
-      - sidecar+adapter+livecdp accepted 5 allowlisted Cookies with zero failures
-      - fresh named session reached authenticated Tailscale DNS and closed
-    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3
-
-  - target: pro
-    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
-    tag: fork-v1.1.0-r3
-    artifact_sha256: 3b45749dca3d8513fa4e7dcf30ba448fc3bfd01e0cb98f0e1595d3e4c6dd4b9c
-    architecture: darwin-arm64
-    signing_status: ad-hoc-linker-signed-not-notarized
-    installed_path: /Users/yoyo/.local/bin/agentcookie
-    version_readback: fork-v1.1.0-r3
-    runtime_readback:
-      - daily 10:00 source LaunchAgent last exit code 0
-      - strict Cookie-only Dia source skipped secrets, Local Storage, and IndexedDB
-      - latest fan-out sent 3470 Cookies to grok-bot and 5 allowlisted Cookies to mini
-    limitation: named-session GUI E2E not run over SSH because macOS denied the GUI audit-session switch
-    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3
-
-  - target: grok-bot
-    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
-    tag: fork-v1.1.0-r3
-    artifact_sha256: 1319eb8d8b644aa605d5a502f4cb9ca73b28d40f54a8e9dc4c6658409dbf7aaf
-    architecture: linux-amd64
-    signing_status: unsigned-local-build
-    installed_path: /home/box/.local/bin/agentcookie
-    version_readback: fork-v1.1.0-r3
-    runtime_readback:
-      - agent-browser 0.33.0 fresh sidecar-backed session reached authenticated Tailscale DNS and closed
-      - fixed sink health ok and latest live-CDP write accepted 3470 Cookies with zero failures
-      - running sink remains the compatible pre-fork official inode under sand-exit-watch
-    running_sink_sha256: 718304521a469f1379c88d70fcf940ff5db60e380992122822566081ef5bff23
-    running_sink_transition: controlled restart deferred; disk binary is r3
-    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3
+deployment_validation:
+  evidence_scope: public-role-level
+  operator_receipts: intentionally-not-published
+  roles:
+    - role: source-workstation
+      architecture: darwin-arm64
+      validated:
+        - Dia source read
+        - strict Cookie-only boundary
+        - independently paired fan-out with per-target policy
+    - role: restricted-sink
+      architecture: darwin-arm64
+      validated:
+        - official-compatible sidecar and live-CDP materialization
+        - allowlisted named-session injection
+        - authenticated navigation and session close
+    - role: headless-sink
+      architecture: linux-amd64
+      validated:
+        - official v1 wire compatibility and sidecar/live-CDP delivery
+        - fork CLI named-session injection
+        - authenticated navigation and session close
+  privacy_boundary:
+    - hostnames, OS usernames, local paths, schedules, process IDs, and per-machine artifact digests are operator-private
+    - Cookie values and pairing material are excluded from all evidence

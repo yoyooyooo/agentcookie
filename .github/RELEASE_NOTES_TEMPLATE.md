@@ -44,11 +44,12 @@ make build
 
 ## Runtime Model
 
-- Pro: Dia is the Cookie source of truth and runs the only scheduled source.
-- mini and grok-bot: official-compatible sink on Tailnet port 9999 maintains
-  fixed Chrome/sidecar identity.
-- Every machine: named Agent Browser sessions receive Cookie identity on
-  demand and are closed after the automation job.
+- A source workstation reads the configured Chromium-family browser, including
+  Dia, and may fan out to independently paired sinks.
+- A sink materializes the official sidecar and may also maintain a fixed Chrome
+  identity through its configured delivery adapter.
+- Any source or sink can grant the current Cookie state to one named Agent
+  Browser session on demand, then close that browser after the automation job.
 
 ## Honest Limits
 

@@ -9,19 +9,19 @@ func TestLoadSourceFanoutTargets(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "source.yaml", `
 targets:
-  mini:
-    url: http://mini:9999/sync
-    peer: mini
+  restricted-sink:
+    url: http://restricted-sink:9999/sync
+    peer: restricted-sink
     policy: allowlist
     domains:
-      - pattern: "tailscale.com"
-      - pattern: "%.tailscale.com"
-  grok-bot:
-    url: http://grok-bot:9999/sync
-    peer: grok-bot
-  parked:
-    url: http://parked:9999/sync
-    peer: parked
+      - pattern: "example.com"
+      - pattern: "%.example.com"
+  full-sink:
+    url: http://full-sink:9999/sync
+    peer: full-sink
+  parked-sink:
+    url: http://parked-sink:9999/sync
+    peer: parked-sink
     disabled: true
 browser:
   name: dia
@@ -36,15 +36,15 @@ browser:
 	if err != nil {
 		t.Fatalf("SelectSourceTargets: %v", err)
 	}
-	if len(targets) != 2 || targets[0].Name != "grok-bot" || targets[1].Name != "mini" {
+	if len(targets) != 2 || targets[0].Name != "full-sink" || targets[1].Name != "restricted-sink" {
 		t.Fatalf("enabled targets = %+v", targets)
 	}
 
-	selected, err := cfg.SelectSourceTargets([]string{"mini"})
+	selected, err := cfg.SelectSourceTargets([]string{"restricted-sink"})
 	if err != nil {
-		t.Fatalf("SelectSourceTargets mini: %v", err)
+		t.Fatalf("SelectSourceTargets restricted-sink: %v", err)
 	}
-	if len(selected) != 1 || selected[0].Peer != "mini" || selected[0].Policy == nil || selected[0].Policy.PolicyMode() != CookiePolicyAllowlist {
+	if len(selected) != 1 || selected[0].Peer != "restricted-sink" || selected[0].Policy == nil || selected[0].Policy.PolicyMode() != CookiePolicyAllowlist {
 		t.Fatalf("selected target = %+v", selected)
 	}
 	if _, err := cfg.SelectSourceTargets([]string{"missing"}); err == nil {
@@ -60,9 +60,9 @@ sink:
 peer:
   hostname: legacy
 targets:
-  mini:
-    url: http://mini:9999/sync
-    peer: mini
+  fanout-sink:
+    url: http://fanout-sink:9999/sync
+    peer: fanout-sink
 `)
 	_, err := LoadSource(dir)
 	if err == nil || !strings.Contains(err.Error(), "cannot be configured together") {
@@ -76,9 +76,9 @@ func TestLoadSourceRejectsInvalidFanoutTarget(t *testing.T) {
 		yaml string
 		want string
 	}{
-		{name: "missing URL", yaml: "targets:\n  mini:\n    peer: mini\n", want: "targets.mini.url is required"},
-		{name: "missing peer", yaml: "targets:\n  mini:\n    url: http://mini:9999/sync\n", want: "targets.mini.peer is required"},
-		{name: "invalid policy", yaml: "targets:\n  mini:\n    url: http://mini:9999/sync\n    peer: mini\n    policy: unknown\n", want: "targets.mini.policy"},
+		{name: "missing URL", yaml: "targets:\n  target:\n    peer: target\n", want: "targets.target.url is required"},
+		{name: "missing peer", yaml: "targets:\n  target:\n    url: http://target:9999/sync\n", want: "targets.target.peer is required"},
+		{name: "invalid policy", yaml: "targets:\n  target:\n    url: http://target:9999/sync\n    peer: target\n    policy: unknown\n", want: "targets.target.policy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -149,20 +149,20 @@ sinks. Replace the legacy `sink` and `peer` fields with named `targets`:
 
 ```yaml
 targets:
-  grok-bot:
-    url: http://grok-bot:9999/sync
-    peer: grok-bot
-  mini:
-    url: http://mini:9999/sync
-    peer: mini
+  full-sink:
+    url: http://full-sink:9999/sync
+    peer: full-sink
+  restricted-sink:
+    url: http://restricted-sink:9999/sync
+    peer: restricted-sink
     policy: allowlist
     domains:
-      - pattern: "tailscale.com"
-      - pattern: "%.tailscale.com"
+      - pattern: "example.com"
+      - pattern: "%.example.com"
 ```
 
 Running `agentcookie source --once` pushes to every enabled target. Use
-`--target mini` to select one target. Every target has its own pairing key,
+`--target restricted-sink` to select one target. Every target has its own pairing key,
 source-side policy, Tailscale hostname resolution, timeout, and result; one
 failed target does not prevent attempts to the others. Existing one-sink
 `source.yaml` files remain supported and use the official wire protocol.
