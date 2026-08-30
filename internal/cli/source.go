@@ -300,12 +300,18 @@ func pushOnce(
 		}
 	}
 
-	// v0.14: combined v1 bus + v2 discovery. LoadPayloadWithDiscovery
-	// runs v1 LoadPayload AND v2 Discover, reads each discovered project's
-	// [secrets.file] in place, applies sync policy, and merges. v1 bus
-	// wins per-key over v2 read-in-place per spec section 10.3.
+	cookiesOnly := os.Getenv("AGENTCOOKIE_COOKIES_ONLY") == "1"
+
+	// A cookies-only source must not read the secrets bus. This is a
+	// capability boundary, not just a smaller envelope.
 	home, _ := os.UserHomeDir()
-	secretsPayload, secretsErrs := secretsbus.LoadPayloadWithDiscovery(home)
+	var secretsPayload *secretsbus.Payload
+	var secretsErrs []error
+	if cookiesOnly {
+		fmt.Fprintln(os.Stderr, "agentcookie source: AGENTCOOKIE_COOKIES_ONLY=1; skipping secrets bus")
+	} else {
+		secretsPayload, secretsErrs = secretsbus.LoadPayloadWithDiscovery(home)
+	}
 	for _, e := range secretsErrs {
 		fmt.Fprintf(os.Stderr, "agentcookie source: secrets-bus: %v\n", e)
 	}
@@ -352,7 +358,6 @@ func pushOnce(
 	var lsTarball []byte
 	var idbTarball []byte
 	var idbSkipped []string
-	cookiesOnly := os.Getenv("AGENTCOOKIE_COOKIES_ONLY") == "1"
 	// IndexedDB is opt-in (typical dirs are 400MB+). Local Storage is packed
 	// by default, but a busy Dia/Chrome profile can still be tens of MB and
 	// blow the Tailscale POST. AGENTCOOKIE_COOKIES_ONLY=1 skips both.

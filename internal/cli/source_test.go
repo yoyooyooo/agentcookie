@@ -203,6 +203,27 @@ domains:
 	}
 }
 
+func TestCookiesOnlyDoesNotShipSecretsBus(t *testing.T) {
+	fx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".example.com", Name: "session", Value: "value", Path: "/"},
+	})
+	secretDir := filepath.Join(os.Getenv("HOME"), ".agentcookie", "secrets", "demo-cli")
+	if err := os.MkdirAll(secretDir, 0o700); err != nil {
+		t.Fatalf("mkdir secrets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secretDir, "secrets.env"), []byte("TOKEN=must-not-ship\n"), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+	t.Setenv("AGENTCOOKIE_COOKIES_ONLY", "1")
+
+	if _, err := fx.push(); err != nil {
+		t.Fatalf("cookies-only push: %v", err)
+	}
+	if got := fx.capture.secretsCountAt(0); got != 0 {
+		t.Fatalf("cookies-only envelope shipped %d secrets CLIs", got)
+	}
+}
+
 type sourcePushFixture struct {
 	configDir string
 	cfg       *config.SourceConfig
@@ -257,9 +278,10 @@ func (f *sourcePushFixture) hostsAt(i int) []string {
 }
 
 type sourceCapture struct {
-	secret  string
-	mu      sync.Mutex
-	batches [][]chrome.Cookie
+	secret        string
+	mu            sync.Mutex
+	batches       [][]chrome.Cookie
+	secretsCounts []int
 }
 
 func newSourceCapture(t *testing.T, secret string) *sourceCapture {
@@ -285,6 +307,7 @@ func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	c.mu.Lock()
 	c.batches = append(c.batches, append([]chrome.Cookie(nil), envelope.Cookies...))
+	c.secretsCounts = append(c.secretsCounts, len(envelope.Secrets))
 	c.mu.Unlock()
 
 	return &http.Response{
@@ -306,6 +329,12 @@ func (c *sourceCapture) batchAt(i int) []chrome.Cookie {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]chrome.Cookie(nil), c.batches[i]...)
+}
+
+func (c *sourceCapture) secretsCountAt(i int) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.secretsCounts[i]
 }
 
 func seedSourceCookiesDB(t *testing.T, path string, cookies []chrome.Cookie, key []byte) {
