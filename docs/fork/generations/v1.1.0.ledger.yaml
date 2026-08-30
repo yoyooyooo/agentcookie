@@ -8,6 +8,11 @@ generation:
     tag: v1.1.0
     tag_object_sha: 87103215be1f239b52599039c1f48618dcd5a5f1
     sha: 97dd731250b0d9a340f2d0fa776346d807335d60
+  accepted_source:
+    sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+    tag: fork-v1.1.0-r3
+    tag_object_sha: 2f9b50674f62dbc980b4c51097294a0b0cc51f00
+    accepted_at: 2026-08-30
 
 deltas:
   - id: dia-source-adapter
@@ -92,7 +97,7 @@ deltas:
     category: feature
     prior_commits: []
     decision: keep
-    reason: All three operator machines require on-demand identity in independent temporary Agent Browser sessions.
+    reason: All three operator machines require on-demand identity in independent temporary Agent Browser sessions; the user-facing capability remains while its r1/r2 transport is superseded.
     evidence:
       - docs/agent-browser-sessions.md
       - internal/cli/agent_browser_test.go
@@ -103,7 +108,7 @@ deltas:
     replay_branch: feature/agent-browser-session-inject-v1.1.0
     verification:
       - go test ./...
-      - go test -race ./pkg/sidecar ./internal/livecdp ./internal/cli
+      - go test -race ./...
       - go vet ./...
       - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
 
@@ -128,10 +133,11 @@ deltas:
     title: Inject through browser-level CDP without taking ownership of Agent Browser pages
     category: fix
     prior_commits: []
-    decision: keep
-    reason: A chromedp page context closes its target during cleanup and can invalidate the Agent Browser daemon's retained page session. Direct browser WebSocket commands detach without closing any page.
+    decision: superseded
+    reason: r1 avoided page ownership through a second browser WebSocket, but r3 delegates Cookie writes to agent-browser's native session RPC and removes the second CDP client entirely.
     evidence:
-      - internal/livecdp/browser_websocket.go
+      - commit 8956299
+      - internal/livecdp/browser_websocket.go deleted by f29dba8
       - internal/cli/agent_browser_e2e_test.go
     dependencies: [named-agent-browser-session-injection, patched-go-toolchain]
     migration_impact: none
@@ -139,6 +145,49 @@ deltas:
     verification:
       - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
       - go test -race ./...
+    superseded_by: native-agent-browser-session-rpc
+    retirement_condition: Superseded in fork-v1.1.0-r3; retained only in immutable r1/r2 history.
+
+  - id: direct-websocket-readiness-retry
+    title: Retry early same-URL CDP readiness for a newly started session
+    category: fix
+    prior_commits: []
+    decision: superseded
+    reason: r2 bounded a startup race in the direct-WebSocket transport; r3 removes that transport and lets agent-browser own daemon readiness.
+    evidence:
+      - commit 6d883c8
+      - tag fork-v1.1.0-r2
+    dependencies: [non-owning-browser-websocket-injection]
+    migration_impact: none
+    replay_branch: fix/agent-browser-cdp-readiness-v1.1.0
+    verification:
+      - GitHub ci run 33291642418
+      - GitHub lint run 33291642394
+      - GitHub govulncheck run 33291642353
+    superseded_by: native-agent-browser-session-rpc
+    retirement_condition: Superseded in fork-v1.1.0-r3; retained only in immutable r2 history.
+
+  - id: native-agent-browser-session-rpc
+    title: Inject through agent-browser native JSON batch stdin
+    category: fix
+    prior_commits: []
+    decision: keep
+    reason: Native session RPC preserves agent-browser ownership, needs no fixed CDP port or second WebSocket, and keeps Cookie values out of argv, logs, output, and temporary files.
+    evidence:
+      - internal/cli/agent_browser.go
+      - internal/cli/agent_browser_test.go
+      - internal/cli/agent_browser_e2e_test.go
+      - docs/agent-browser-sessions.md
+    dependencies: [named-agent-browser-session-injection, patched-go-toolchain]
+    migration_impact: none
+    replay_branch: fix/agent-browser-native-session-rpc-v1.1.0
+    verification:
+      - go test -race ./...
+      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
+      - two parallel cold named-session injections
+      - GitHub ci run 33292425731
+      - GitHub lint run 33292425590
+      - GitHub govulncheck run 33292425642
 
   - id: explicit-official-sink-test-policy
     title: Make the official sink compatibility fixture platform-independent
@@ -191,3 +240,76 @@ deltas:
       - GitHub ci run 33291078262
       - GitHub lint run 33291078269
       - GitHub govulncheck run 33291078261
+
+release_tags:
+  - name: fork-v1.1.0-r1
+    tag_object_sha: c57ff47521b8ba9528547c67e23914781a1dd289
+    source_sha: 1d51eabaf4f6f04e57b02ef287ae7005a461101d
+    status: superseded-for-deployment
+    immutable: true
+  - name: fork-v1.1.0-r2
+    tag_object_sha: 23fd6e495297c83405301aa572e575ef8964f06c
+    source_sha: 6d883c827eded2a5bd194d59084c105bf6b6222a
+    status: superseded-for-deployment
+    immutable: true
+  - name: fork-v1.1.0-r3
+    tag_object_sha: 2f9b50674f62dbc980b4c51097294a0b0cc51f00
+    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+    status: active-deployment-authority
+    immutable: true
+
+verification_runs:
+  accepted_source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+  github:
+    ci: {id: 33292425731, conclusion: success}
+    lint: {id: 33292425590, conclusion: success}
+    govulncheck: {id: 33292425642, conclusion: success}
+    release: {id: 33292498327, conclusion: skipped}
+  release_artifact: none
+  release_api_readback: 404-not-found
+
+deployment_receipts:
+  - target: mini
+    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+    tag: fork-v1.1.0-r3
+    artifact_sha256: c1194b294d3dc33e452fa4beebd855c96c9461e57346869c521f93b24ba41638
+    architecture: darwin-arm64
+    signing_status: ad-hoc-linker-signed-not-notarized
+    installed_path: /Users/yoyo/.local/bin/agentcookie
+    version_readback: fork-v1.1.0-r3
+    runtime_readback:
+      - com.yoyo.agentcookie-sink KeepAlive healthy on Tailnet port 9999
+      - sidecar+adapter+livecdp accepted 5 allowlisted Cookies with zero failures
+      - fresh named session reached authenticated Tailscale DNS and closed
+    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3
+
+  - target: pro
+    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+    tag: fork-v1.1.0-r3
+    artifact_sha256: 3b45749dca3d8513fa4e7dcf30ba448fc3bfd01e0cb98f0e1595d3e4c6dd4b9c
+    architecture: darwin-arm64
+    signing_status: ad-hoc-linker-signed-not-notarized
+    installed_path: /Users/yoyo/.local/bin/agentcookie
+    version_readback: fork-v1.1.0-r3
+    runtime_readback:
+      - daily 10:00 source LaunchAgent last exit code 0
+      - strict Cookie-only Dia source skipped secrets, Local Storage, and IndexedDB
+      - latest fan-out sent 3470 Cookies to grok-bot and 5 allowlisted Cookies to mini
+    limitation: named-session GUI E2E not run over SSH because macOS denied the GUI audit-session switch
+    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3
+
+  - target: grok-bot
+    source_sha: f29dba8f5edeff44a9881f4c9a3059afa3a1c215
+    tag: fork-v1.1.0-r3
+    artifact_sha256: 1319eb8d8b644aa605d5a502f4cb9ca73b28d40f54a8e9dc4c6658409dbf7aaf
+    architecture: linux-amd64
+    signing_status: unsigned-local-build
+    installed_path: /home/box/.local/bin/agentcookie
+    version_readback: fork-v1.1.0-r3
+    runtime_readback:
+      - agent-browser 0.33.0 fresh sidecar-backed session reached authenticated Tailscale DNS and closed
+      - fixed sink health ok and latest live-CDP write accepted 3470 Cookies with zero failures
+      - running sink remains the compatible pre-fork official inode under sand-exit-watch
+    running_sink_sha256: 718304521a469f1379c88d70fcf940ff5db60e380992122822566081ef5bff23
+    running_sink_transition: controlled restart deferred; disk binary is r3
+    rollback_source: ~/.local/bin/agentcookie.before-fork-v1.1.0-r3

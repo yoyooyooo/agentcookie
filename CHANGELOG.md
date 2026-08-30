@@ -1,6 +1,6 @@
 # Changelog
 
-## [fork-v1.1.0-r3] - Unreleased
+## [fork-v1.1.0-r3] - 2026-08-30
 
 ### Agent Browser session injection
 
