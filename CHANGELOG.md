@@ -1,5 +1,14 @@
 # Changelog
 
+## [fork-v1.1.0-r7] - 2026-08-30
+
+### Agent skill
+
+- Taught the bundled Skill to distinguish ordinary Chrome, externally managed
+  automation Chrome, and named Agent Browser sessions.
+- Added the unattended `real_chrome.mode: offline` operator flow and explicit
+  OpenCLI/OpenClaw consumer narrative without any machine-specific topology.
+
 ## [fork-v1.1.0-r6] - 2026-08-30
 
 ### Ordinary Google Chrome delivery
