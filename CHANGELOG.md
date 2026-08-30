@@ -12,6 +12,8 @@
   through agent-browser, and non-loopback CDP endpoints are rejected.
 - Injection uses browser-level WebSocket commands and never owns or closes the
   Agent Browser daemon's page target.
+- A bounded five-second readiness retry handles the startup window where a new
+  browser has published its WebSocket URL but resets an immediate second client.
 - The optional real-browser E2E is validated repeatedly against agent-browser 0.33.0.
 - The fork requires Go 1.26.6, which clears the reachable standard-library
   vulnerabilities reported against the upstream 1.26.4 baseline.

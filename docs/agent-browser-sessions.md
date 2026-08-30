@@ -59,7 +59,10 @@ create, attach to, own, or close a page target. No fixed debug port is required,
 so concurrent sessions cannot collide.
 
 Only loopback CDP hosts (`127.0.0.1`, `::1`, or `localhost`) are accepted. A
-remote or Tailnet CDP endpoint is rejected even when reachable.
+remote or Tailnet CDP endpoint is rejected even when reachable. A newly launched
+browser can publish its WebSocket URL just before accepting another client;
+agentcookie retries the browser-level injection for up to five seconds without
+creating or closing page targets.
 
 ## Source and sink behavior
 
