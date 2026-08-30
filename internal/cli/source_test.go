@@ -250,6 +250,11 @@ func TestFanoutEnvelopeIsAcceptedByOfficialV1Sink(t *testing.T) {
 	http.DefaultTransport = realTransport
 
 	sinkFx := newSinkHandlerFixture(t, true)
+	writeCLIFile(t, filepath.Join(sinkFx.configDir, "blocklist.yaml"), `
+version: 1
+policy: blocklist
+domains: []
+`)
 	server := httptest.NewServer(sinkFx.mux)
 	defer server.Close()
 	restoreResolver := SetResolveSinkURLForTesting(func(_ context.Context, rawURL string) (string, error) {
