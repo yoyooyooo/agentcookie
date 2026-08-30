@@ -1,5 +1,14 @@
 # Changelog
 
+## [Fork Unreleased]
+
+### Agent skill
+
+- Refocused the project Skill on automatic, domain-scoped Cookie injection into
+  named Agent Browser sessions before authenticated navigation.
+- Kept source/sink installation as an explicit maintenance path and removed stale
+  one-sink, fixed-port, and always-running-browser assumptions.
+
 ## [fork-v1.1.0-r3] - 2026-08-30
 
 ### Agent Browser session injection

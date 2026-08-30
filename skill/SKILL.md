@@ -1,258 +1,124 @@
 ---
-name: agentcookie-install
-description: Install agentcookie on a Mac source and a Linux or Mac sink so Chrome cookies sync continuously over Tailscale. Use when the user says "install agentcookie", "set up cookie sync", "share my Chrome sessions with my agent box", or "make my agent log in as me".
-version: 1.0.0
+name: agentcookie
+description: >-
+  Reuse an existing authenticated browser identity in one named agent-browser session. Use alongside agent-browser whenever a website task may need the user's current login, or when working with agentcookie, Dia/Chrome Cookie SSoT, cross-machine Cookie sync, source/sink status, or session injection. Inject before the first authenticated navigation so the user does not need to repeat the Cookie workflow.
+version: 1.1.0-fork.3
 ---
 
-# agentcookie install
+# agentcookie
 
-You are helping the user install agentcookie on two machines that are both on the same Tailscale tailnet, then pair them, so that the sink's Chrome stays continuously in sync with the source's Chrome.
+`agentcookie` delivers browser Cookies. `agent-browser` owns navigation and page
+automation. Use both for authenticated browser work: agentcookie prepares one
+isolated session, then every browser command reuses that session.
 
-After install, the user does not touch agentcookie again. The source watches Chrome via fsnotify and pushes every cookie change to the sink within seconds. On Linux, the sink injects cookies via CDP into an already-running Chrome. On macOS, a LaunchAgent keeps the daemon running across reboots.
+## Default Authenticated Browser Flow
 
-## Inputs you need
+Use this flow automatically when a web task is likely to need an existing login.
+Do not wait for the user to repeat the injection instructions.
 
-1. Which machine is the **source** (the Mac the user logs into Chrome on, usually their laptop).
-2. Which machine is the **sink** (where AI agents act - a Linux VM like Grok Bot, or a second Mac).
-3. Tailscale is up on both.
-4. On Linux: Chrome is running with `--remote-debugging-port=9223` (or another port).
+1. Load the installed agent-browser workflow before browser commands:
 
-If any of these are missing, stop and ask.
+   ```bash
+   agent-browser skills get core
+   ```
 
-## Flow: Mac source to Linux sink (featured path)
+2. Reuse an explicitly selected session. Otherwise generate a task-specific one:
 
-### Step 0: detect the lay of the land
+   ```bash
+   SESSION="$(agent-browser session id --scope worktree --prefix account-audit)"
+   ```
 
-Run on the current machine:
+   Use `--scope cwd` outside a Git worktree. Concurrent tasks need different
+   prefixes. Keep the exact same session name for injection, navigation, and close.
 
-```bash
-uname -s  # Darwin = macOS, Linux = Linux
-tailscale status 2>&1 | head -20
-```
+3. Derive the narrow site domain required by the target URL, then inject before
+   the first application navigation:
 
-From the Tailscale status output, identify which host is the Mac and which is the Linux box.
+   ```bash
+   agentcookie --json agent-browser inject \
+     --session "$SESSION" \
+     --domain example.com
+   ```
 
-### Step 1: confirm source vs sink with the user
+   `--domain` is repeatable for an application that genuinely spans multiple
+   Cookie domains. Do not omit it and inject the full Cookie set unless the user
+   explicitly requests that broader identity surface.
 
-Use the platform's blocking question primitive. Phrase it concretely:
+4. Inspect the value-free JSON result. `cookies` must be greater than zero.
+   `started: true` means agentcookie started an inactive browser on `about:blank`;
+   `started: false` means it reused the active named session.
 
-> I see you're on `<current-hostname>`. Looks like `<other-hostname>` (Tailscale IP `100.x.y.z`) is your other machine. Should I install agentcookie with `<current-hostname>` as the source (your logged-in Chrome) and `<other-hostname>` as the sink (where your agents run)?
+5. Navigate and automate with the same session:
 
-Confirm before proceeding. If wrong, ask which is which.
+   ```bash
+   agent-browser --session "$SESSION" open https://example.com
+   agent-browser --session "$SESSION" snapshot -i
+   ```
 
-### Step 2: install on the Mac source
+6. Verify authentication from page state, URL, or title. Do not dump Cookie values
+   as a verification step.
 
-Install the binary if missing:
+7. Release the temporary browser when the task is complete:
 
-```bash
-# Download from GitHub Releases
-curl -LO https://github.com/mvanhorn/agentcookie/releases/download/v1.0.0/agentcookie_1.0.0_darwin_arm64.tar.gz
-tar -xzf agentcookie_1.0.0_darwin_arm64.tar.gz
-sudo mv agentcookie /usr/local/bin/
-```
+   ```bash
+   agent-browser --session "$SESSION" close
+   ```
 
-Or build from source:
+   Closing is asynchronous. Do not close and immediately reuse the same name;
+   choose a fresh task session instead. Inject directly into an already-active
+   session when refresh is needed.
 
-```bash
-go install github.com/mvanhorn/agentcookie/cmd/agentcookie@v1.0.0
-```
+## Source Selection
 
-Run the source wizard. It blocks until pairing completes:
+The default `--from auto` is normally correct:
 
-```bash
-agentcookie wizard install --as source --peer <linux-hostname> &
-WIZARD_PID=$!
-```
+- With `source.yaml`, agentcookie reads the configured live source browser. This
+  fork supports Dia as a Chromium Cookie source.
+- With `sink.yaml`, agentcookie reads the latest official plaintext sidecar.
+- Use `--from source` or `--from sink` only when both configurations exist and
+  the intended authority would otherwise be ambiguous.
 
-Run in the background because we need to poll the pairing info file:
+Injection is local. Run it on the same machine and as the same OS user that runs
+agent-browser. Tailscale carries source-to-sink synchronization; it does not make
+one machine's local Agent Browser session remotely injectable. For a remote task,
+run both commands on that target machine.
 
-```bash
-# Wait up to 30 seconds for the pairing info to appear.
-for i in {1..120}; do
-  if [ -f ~/.agentcookie/pairing.json ]; then break; fi
-  sleep 0.25
-done
-cat ~/.agentcookie/pairing.json
-```
+## Relationship To Fixed Chrome Sync
 
-Extract `code` and `pair_url` from the JSON output. These are what the sink needs. The code expires in 10 minutes.
+The long-lived source/sink path and on-demand Agent Browser path are separate:
 
-### Step 3: install on the Linux sink
+- `agentcookie source` and `agentcookie sink` keep fixed browser or sidecar state
+  synchronized through the official wire protocol.
+- `agentcookie agent-browser inject` grants that current state to one named,
+  temporary session.
+- Do not start a persistent Chrome, sink, or debug port just for one Agent Browser
+  task. An inactive session starts on demand and should be closed afterward.
 
-Do NOT run `wizard install --as sink` on Linux. The wizard omits the policy file (which means allowlist-empty / ship nothing) and can write `cdp.enabled: true` (which launches a second Chrome that fights your existing Chrome).
+## Preflight And Failure Handling
 
-Instead, write the config files directly:
-
-```bash
-# Install the binary
-curl -LO https://github.com/mvanhorn/agentcookie/releases/download/v1.0.0/agentcookie_1.0.0_linux_amd64.tar.gz
-tar -xzf agentcookie_1.0.0_linux_amd64.tar.gz
-sudo mv agentcookie /usr/local/bin/
-
-# Create config directory
-mkdir -p ~/.config/agentcookie
-
-# Get the Tailscale IP
-TAILSCALE_IP=$(tailscale ip -4)
-
-# Write sink.yaml
-cat > ~/.config/agentcookie/sink.yaml << EOF
-listen:
-  addr: ${TAILSCALE_IP}:9999
-
-peer:
-  hostname: <mac-hostname>  # REPLACE with Mac's Tailscale hostname
-
-live_cdp:
-  enabled: true
-  endpoint: http://127.0.0.1:9223
-
-skip_chrome_sqlite: true
-EOF
-
-# Write blocklist.yaml for sync-all on a trusted box
-cat > ~/.config/agentcookie/blocklist.yaml << 'EOF'
-version: 1
-policy: blocklist
-domains: []
-EOF
-
-# Pair with the Mac source
-agentcookie pair --as sink \
-  --peer <mac-hostname> \
-  --code <code-from-pairing.json> \
-  --pair-url <pair_url-from-pairing.json>
-```
-
-### Step 4: attach to existing Chrome (or start one as fallback)
-
-On Grok Bot and most agent runtimes, Chrome is already running with a debug port. Probe before starting a new one:
+Start diagnosis with value-free readbacks:
 
 ```bash
-# Check if Chrome is already listening on common debug ports
-for port in 9223 9222 9224 9228 9229; do
-  if curl -s "http://127.0.0.1:${port}/json/version" >/dev/null 2>&1; then
-    echo "Chrome found on port ${port}"
-    # Update sink.yaml to use this port
-    sed -i "s|endpoint: http://127.0.0.1:.*|endpoint: http://127.0.0.1:${port}|" \
-      ~/.config/agentcookie/sink.yaml
-    break
-  fi
-done
-```
-
-If no Chrome is listening, start one as a fallback:
-
-```bash
-# Only if no existing Chrome debug port was found
-google-chrome --remote-debugging-port=9223 &
-```
-
-Starting a second Chrome when one is already running on the same port causes conflicts. Always probe first.
-
-### Step 5: start the sink
-
-```bash
-agentcookie sink
-```
-
-For a persistent daemon, write a systemd user unit:
-
-```bash
-mkdir -p ~/.config/systemd/user/
-cat > ~/.config/systemd/user/agentcookie-sink.service << 'EOF'
-[Unit]
-Description=agentcookie sink
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/agentcookie sink
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable --now agentcookie-sink.service
-```
-
-### Step 6: verify the install
-
-```bash
-# On Mac
-agentcookie doctor
+agentcookie version
 agentcookie status --json
-
-# On Linux
-agentcookie doctor
-agentcookie status --json
+agent-browser --version
 ```
 
-On Linux, look for:
-- `live_cdp: endpoint reachable` - must be OK
-- `tailnet: bind address` - must be OK
-- `LastWriteMode` containing `livecdp` in status output
-- `live_cdp: injected N cookies into M context(s)` in sync output
+Then apply these rules:
 
-Ignore expected FAILs on Linux: codesign, Chrome.app path, launchctl (these are macOS-specific).
+- If `agent-browser inject` is missing, the installed agentcookie is not this fork
+  generation. Do not emulate it by editing Chrome SQLite or opening a second CDP
+  connection.
+- If `cookies` is zero, verify the domain and sidecar/source freshness. Do not
+  silently widen to every domain.
+- If the site still redirects to login, the Cookie may be expired or device-bound.
+  Report that boundary instead of repeatedly exporting broader identity state.
+- If the sink has no recent write, repair source/sink delivery first; session
+  injection cannot manufacture absent Cookies.
+- Never print Cookie values, pairing keys, sidecar contents, or browser database
+  rows in logs or chat.
 
-The message `wrote 0 cookies` for Chrome SQLite is expected on Linux. Success is the live CDP inject line.
-
-### Step 7: report to the user
-
-In plain language. Example:
-
-> Done. agentcookie is running on both `<source>` and `<sink>`. The source pushes cookies as soon as they change in Chrome. The sink injects them via CDP into Chrome at port 9223. browserUse, Puppeteer, Playwright, or any Chromium automation connecting to that port will see your logged-in session.
-
-## Flow: Mac source to Mac sink
-
-For Mac-to-Mac, the wizard works:
-
-```bash
-# On the second Mac
-agentcookie wizard install --as sink \
-  --peer <source-mac-hostname> \
-  --code <pairing-code> \
-  --pair-url http://<source-mac>:9998/pair
-```
-
-The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and per-CLI adapter session files.
-
-## Fork capability: inject one temporary Agent Browser session
-
-When this fork is installed, a source or sink can grant cookies to one named
-Agent Browser session without running the long-lived `agent-sync` browser:
-
-```bash
-SESSION="$(agent-browser session id --scope worktree --prefix task)"
-agentcookie agent-browser inject --session "$SESSION" --domain example.com
-agent-browser --session "$SESSION" open https://example.com
-# Reuse the same --session for every command, then release it:
-agent-browser --session "$SESSION" close
-```
-
-The inject command must run on the same machine and OS user as agent-browser.
-It reads the configured source browser on a source machine or the official
-sidecar on a sink and starts an inactive session on `about:blank`. Cookie values
-reach only agent-browser's local JSON batch stdin, never argv or a temporary
-file. Prefer a narrow `--domain` for each job.
-
-## What to do if something errors
-
-**`agentcookie: command not found`**: The binary is not on `$PATH`. Either use the full path (`/usr/local/bin/agentcookie`) or add the bin directory to PATH.
-
-**Sink pairing returns `connection refused`**: Tailscale ACLs may be blocking tailnet-internal traffic on port 9998. Check `tailscale status` shows the source as reachable. If the source is online but unreachable, the user has restrictive ACLs to relax.
-
-**`live_cdp: endpoint reachable FAIL`**: Chrome is not running with `--remote-debugging-port`. Start Chrome with the debug port, or check that the port in sink.yaml matches the actual port.
-
-**`agentcookie status` reports zero syncs**: The source watcher has not seen a Chrome write yet. Open a tab on the source's Chrome (any domain) and refresh. The sync should appear within 2 seconds.
-
-**Doctor shows `sync-all` but cookies don't land**: The policy label and actual behavior can diverge. Verify success with `live_cdp: injected N cookies into M context(s)` in the sync output, not the policy label. Also check `LastWriteMode` contains `livecdp`.
-
-## Out of scope for this skill
-
-- Changing the cookie policy or allowlist/blocklist rules (the user edits `~/.config/agentcookie/blocklist.yaml` directly)
-- Rotating pairing keys (re-run wizard on both sides)
-- One source to many sinks (not yet supported)
+Run pairing, persistent daemon installation, fan-out policy changes, or source
+schedule changes only when the user explicitly asks for setup or maintenance.
+Preserve existing configuration and inspect `agentcookie status --json` before
+changing it.

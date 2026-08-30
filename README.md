@@ -394,7 +394,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 | [Consumption](docs/consumption.md) | how tools read synced cookies and secrets on the sink |
 | [agent-sync runbook](docs/runbook-agent-sync.md) | browserUse / agent-browser via live CDP injection |
 | [Secrets bus v2 adoption spec](docs/spec-agentcookie-secrets-bus-v2-adoption.md) | `agentcookie.toml` manifest format |
-| [Install skill](skill/SKILL.md) | agent-executable installer prompt |
+| [Agent skill](skill/SKILL.md) | authenticated Agent Browser session injection and explicit setup/repair |
 
 ## License
 

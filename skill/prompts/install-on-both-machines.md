@@ -1,70 +1,37 @@
-# The "tell your agent this" prompt
+# Agent prompt: configure agentcookie
 
-Copy this into Claude Code, OpenClaw, Hermes, Codex, Cursor, or any agent that can run shell commands locally and over SSH:
+Use this prompt only for first-time setup or repair. Normal Agent Browser tasks
+should use the session-injection flow in `../SKILL.md` without changing daemons.
 
-> Install agentcookie on this Mac and my Linux agent box so my Chrome sessions sync continuously. Use Tailscale to find the Linux box. Confirm with me which machine is the source and which is the sink, then run the full install end to end. After install, verify both sides are running and tell me what you see.
+> Configure agentcookie so my authoritative Mac browser can send Cookies over
+> Tailscale to the machines where I run browser automation. First inspect the
+> existing agentcookie version, source/sink configuration, supervisors, sidecar,
+> and Tailscale reachability. Confirm source and targets with me before changing
+> persistent services. Preserve the official source/sink wire protocol. After
+> setup, verify value-free status and inject a fresh named agent-browser session
+> for one narrow test domain; navigate with that same session and close it.
 
 The agent should:
 
-1. Detect Tailscale and identify the peer machine.
-2. Confirm source vs sink with you.
-3. Run `agentcookie wizard install --as source` here on the Mac, in the background.
-4. Read the pairing code from `~/.agentcookie/pairing.json` once it appears.
-5. SSH to the Linux box and:
-   - Install the agentcookie binary
-   - Write `sink.yaml` with `live_cdp.enabled: true` and the tailnet IP
-   - Write `blocklist.yaml` with `policy: blocklist` and `domains: []`
-   - Run `agentcookie pair --as sink` with the code and URL
-   - Start Chrome with `--remote-debugging-port=9223`
-   - Start `agentcookie sink`
-6. Report back that both sides are up and show the verify output.
+1. Run `agentcookie version` and `agentcookie status --json` on every involved
+   machine before changing configuration.
+2. Confirm the authoritative source browser and every intended sink. Dia is a
+   supported source in this fork; do not assume Chrome is the SSoT.
+3. Reuse existing Tailscale hostnames, pairing state, supervisors, and fixed
+   Chrome endpoints where healthy. Do not start a competing browser or debug port.
+4. Keep Cookie-only and per-target domain policy boundaries when configured.
+5. Treat the persistent fixed-browser sync path separately from temporary
+   Agent Browser sessions.
+6. Verify the source/sink path without printing Cookie values or pairing keys.
+7. Prove the on-demand path with a new session and a narrow domain:
 
-Total elapsed time: about 60 seconds. You do not need to be at the Linux box's screen.
+   ```bash
+   SESSION="$(agent-browser session id --scope cwd --prefix agentcookie-proof)"
+   agentcookie --json agent-browser inject --session "$SESSION" --domain example.com
+   agent-browser --session "$SESSION" open https://example.com
+   agent-browser --session "$SESSION" close
+   ```
 
-## For Mac-to-Mac instead of Mac-to-Linux
-
-> Install agentcookie on this Mac and my Mac mini so my Chrome sessions sync continuously. Use Tailscale to find the Mac mini. Confirm which is source and sink, then run the full install end to end.
-
-The wizard works on macOS sinks:
-
-```bash
-ssh <mac-mini-hostname> "agentcookie wizard install --as sink \
-  --peer <source-hostname> \
-  --code <code> \
-  --pair-url <url>"
-```
-
-## When the prompt is not enough
-
-If the agent gets stuck, the most common reasons (in rough probability order):
-
-1. SSH from your Mac to the Linux box does not work passwordlessly. Fix by setting up SSH keys, or use Tailscale SSH (`tailscale ssh`).
-2. Google Chrome is not installed on the Linux box. Install Chrome.
-3. Chrome is not running with `--remote-debugging-port`. Start it with the debug port.
-4. Tailscale ACLs are restrictive. Default Tailscale config allows everything between your own devices; if you have custom ACLs, allow tailnet-internal traffic on ports 9998 (pairing) and 9999 (sync).
-
-After fixing, re-paste the prompt. The install is mostly idempotent.
-
-## Verifying success
-
-On Mac:
-```bash
-agentcookie doctor
-agentcookie status --json
-```
-
-On Linux:
-```bash
-agentcookie doctor
-agentcookie status --json
-```
-
-Look for:
-- `live_cdp: endpoint reachable` OK
-- `tailnet: bind address` OK
-- `LastWriteMode` containing `livecdp`
-- `live_cdp: injected N cookies into M context(s)` in sync output
-
-Ignore expected FAILs on Linux: codesign, Chrome.app path, launchctl.
-
-The message `wrote 0 cookies` is expected on Linux. Success is the live CDP inject line, not the sidecar or SQLite write.
+8. Report installed versions, supervisors, schedules, health, last write counts,
+   and any unverified boundary. Do not describe a Git tag or local build as a
+   signed GitHub Release.
