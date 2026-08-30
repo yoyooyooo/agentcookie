@@ -35,8 +35,9 @@ jobs:
             exit 1
           }
           source_sha="$(git rev-list -n 1 "$tag")"
-          [[ "$source_sha" == "$GITHUB_SHA" ]] || {
-            echo "tag peels to $source_sha, workflow is at $GITHUB_SHA" >&2
+          checkout_sha="$(git rev-parse HEAD)"
+          [[ "$source_sha" == "$checkout_sha" ]] || {
+            echo "tag peels to $source_sha, checkout is at $checkout_sha" >&2
             exit 1
           }
           {
