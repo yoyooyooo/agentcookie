@@ -33,13 +33,20 @@ const SealedPrefix = "agc1:"
 // Cookie is the public shape returned by ReadSidecar. Fields mirror
 // the columns kooky-style consumers already inspect.
 type Cookie struct {
-	HostKey    string
-	Name       string
-	Value      string
-	Path       string
-	ExpiresUTC int64
-	IsSecure   bool
-	IsHTTPOnly bool
+	HostKey       string
+	Name          string
+	Value         string
+	Path          string
+	ExpiresUTC    int64
+	IsSecure      bool
+	IsHTTPOnly    bool
+	LastAccessUTC int64
+	HasExpires    bool
+	IsPersistent  bool
+	Priority      int
+	SameSite      int
+	SourceScheme  int
+	SourcePort    int
 }
 
 // DefaultPath returns the default sidecar location. agentcookie sink
@@ -68,7 +75,21 @@ func ReadSidecar(path string) ([]Cookie, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT host_key, name, value, path, expires_utc, is_secure, is_httponly FROM cookies`)
+	columns, err := cookieColumns(db)
+	if err != nil {
+		return nil, fmt.Errorf("sidecar: inspect %s: %w", path, err)
+	}
+	query := fmt.Sprintf(`SELECT host_key, name, value, path, expires_utc, is_secure, is_httponly,
+		%s, %s, %s, %s, %s, %s, %s FROM cookies`,
+		optionalColumn(columns, "last_access_utc", "0"),
+		optionalColumn(columns, "has_expires", "CASE WHEN expires_utc = 0 THEN 0 ELSE 1 END"),
+		optionalColumn(columns, "is_persistent", "CASE WHEN expires_utc = 0 THEN 0 ELSE 1 END"),
+		optionalColumn(columns, "priority", "0"),
+		optionalColumn(columns, "samesite", "-1"),
+		optionalColumn(columns, "source_scheme", "0"),
+		optionalColumn(columns, "source_port", "-1"),
+	)
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("sidecar: query %s: %w", path, err)
 	}
@@ -81,12 +102,18 @@ func ReadSidecar(path string) ([]Cookie, error) {
 	)
 	for rows.Next() {
 		var c Cookie
-		var isSecure, isHTTPOnly int
-		if err := rows.Scan(&c.HostKey, &c.Name, &c.Value, &c.Path, &c.ExpiresUTC, &isSecure, &isHTTPOnly); err != nil {
+		var isSecure, isHTTPOnly, hasExpires, isPersistent int
+		if err := rows.Scan(
+			&c.HostKey, &c.Name, &c.Value, &c.Path, &c.ExpiresUTC,
+			&isSecure, &isHTTPOnly, &c.LastAccessUTC, &hasExpires,
+			&isPersistent, &c.Priority, &c.SameSite, &c.SourceScheme, &c.SourcePort,
+		); err != nil {
 			return nil, fmt.Errorf("sidecar: scan row: %w", err)
 		}
 		c.IsSecure = isSecure != 0
 		c.IsHTTPOnly = isHTTPOnly != 0
+		c.HasExpires = hasExpires != 0
+		c.IsPersistent = isPersistent != 0
 
 		if strings.HasPrefix(c.Value, SealedPrefix) {
 			// Lazy-load the master key on first sealed row so a
@@ -109,6 +136,33 @@ func ReadSidecar(path string) ([]Cookie, error) {
 		return nil, fmt.Errorf("sidecar: iterate rows: %w", err)
 	}
 	return out, nil
+}
+
+func cookieColumns(db *sql.DB) (map[string]bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(cookies)`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return nil, err
+		}
+		columns[name] = true
+	}
+	return columns, rows.Err()
+}
+
+func optionalColumn(columns map[string]bool, name, fallback string) string {
+	if columns[name] {
+		return name
+	}
+	return fallback
 }
 
 // SealValue returns the on-disk form of a value-column entry sealed

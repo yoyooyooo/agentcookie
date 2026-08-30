@@ -220,6 +220,24 @@ agentcookie wizard install --as sink \
 
 The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and per-CLI adapter session files.
 
+## Fork capability: inject one temporary Agent Browser session
+
+When this fork is installed, a source or sink can grant cookies to one named
+Agent Browser session without running the long-lived `agent-sync` browser:
+
+```bash
+SESSION="$(agent-browser session id --scope worktree --prefix task)"
+agentcookie agent-browser inject --session "$SESSION" --domain example.com
+agent-browser --session "$SESSION" open https://example.com
+# Reuse the same --session for every command, then release it:
+agent-browser --session "$SESSION" close
+```
+
+The inject command must run on the same machine and OS user as agent-browser.
+It reads the configured source browser on a source machine or the official
+sidecar on a sink, starts an inactive session on `about:blank`, and rejects any
+CDP endpoint that is not loopback. Prefer a narrow `--domain` for each job.
+
 ## What to do if something errors
 
 **`agentcookie: command not found`**: The binary is not on `$PATH`. Either use the full path (`/usr/local/bin/agentcookie`) or add the bin directory to PATH.

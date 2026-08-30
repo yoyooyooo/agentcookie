@@ -297,6 +297,24 @@ agentcookie wizard install --as sink \
 
 The macOS sink writes to Chrome's encrypted SQLite, the plaintext sidecar, and per-CLI adapter session files. It can also run CDP injection into a managed Chrome subprocess. See [docs/quickstart.md](docs/quickstart.md) for the full macOS-to-macOS walkthrough.
 
+## On-demand Agent Browser sessions (fork capability)
+
+Every source or sink machine can inject its current cookies into one exact,
+isolated Agent Browser session without keeping Chrome open between jobs:
+
+```bash
+SESSION="$(agent-browser session id --scope worktree --prefix task)"
+agentcookie agent-browser inject --session "$SESSION" --domain github.com
+agent-browser --session "$SESSION" open https://github.com
+# ...use the same --session for the job...
+agent-browser --session "$SESSION" close
+```
+
+The command starts an inactive session on `about:blank`, discovers that
+session's dynamic loopback CDP endpoint, and injects before navigation. Source
+machines read their configured browser (including Dia); sink machines read the
+latest official sidecar. See [Agent Browser session injection](docs/agent-browser-sessions.md).
+
 ## What about Chrome's device-bound cookies (DBSC)?
 
 Chrome's Device Bound Session Credentials (DBSC) tie a session to one machine's secure hardware so a stolen cookie cannot be replayed elsewhere. For a site that has adopted DBSC, a copied cookie works on the sink only until its short-lived window (minutes) lapses.
@@ -311,6 +329,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Working today
 
+- On-demand injection into one named, isolated Agent Browser session
 - One source to many independently paired sinks, with optional target policies
 - Mac to Linux continuous sync via Tailscale `/sync`
 - Mac to Mac continuous sync (second Mac, Mac mini)
@@ -341,6 +360,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 | Doc | Use |
 |---|---|
+| [Agent Browser sessions](docs/agent-browser-sessions.md) | inject current source/sink cookies into one named temporary session |
 | [Architecture](docs/architecture.md) | module layout, sync lifecycle, security boundaries |
 | [Protocol v1](docs/protocol.md) | wire format spec for future client implementations |
 | [Threat model](docs/threat-model.md) | what agentcookie does and does not protect against |

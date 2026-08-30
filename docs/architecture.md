@@ -57,6 +57,23 @@ policy: blocklist and domains: [] to enable sync-all. This is an EXPLICIT operat
 choice, not the code default. The code default remains security-by-default.
 ```
 
+### On-demand Agent Browser session (fork)
+
+```text
+source machine                         sink machine
+Dia/Chrome -> live read                official sink -> latest sidecar
+              \                       /
+               agentcookie agent-browser inject --session <name>
+                    -> agent-browser session info
+                    -> dynamic loopback CDP discovery
+                    -> Storage.setCookies in that session only
+```
+
+This local path does not alter the source/sink wire protocol. An inactive
+session starts on `about:blank`; after injection the caller navigates and later
+closes it. The CDP browser is session-owned and may use any dynamic port, but
+the discovered host must be loopback.
+
 ## Module layout
 
 | Package | Purpose |
@@ -69,7 +86,9 @@ choice, not the code default. The code default remains security-by-default.
 | `internal/pairing` | X25519 + HKDF handshake. Source listens for pairing; sink connects with the printed code. Both sides derive identical 32-byte keys. |
 | `internal/keystore` | Per-peer key files at `~/.config/agentcookie/keys/<peer>.json` mode 0600. |
 | `internal/protocol` | `SyncEnvelope` (versioned), `SequenceTracker` (in-memory replay defense), `BlocklistMatcher` (SQLite-LIKE patterns, case-insensitive). |
-| `internal/cdp` | Tiny Chrome DevTools Protocol client: `Probe` + `Dial` + `Call`. One method we care about: `Storage.setCookies`. |
+| `internal/livecdp` | High-fidelity Cookie shaping and `Storage.setCookies` injection for existing browser contexts. |
+| `pkg/sidecar` | Public reader for the sink's latest materialized Cookie set, including metadata used by session injection. |
+| `internal/cdp` | CDP path for seeding a managed persistent Chrome profile. |
 
 ## Lifecycle: one sync
 

@@ -2,6 +2,16 @@
 
 ## [fork-v1.1.0-r1] - Unreleased
 
+### Agent Browser session injection
+
+- Added `agentcookie agent-browser inject --session <name>` for exact,
+  on-demand injection into one isolated agent-browser instance.
+- Source machines read their configured browser, including Dia; sink machines
+  consume the latest official sidecar with full cookie metadata.
+- Inactive sessions start on `about:blank`, dynamic CDP ports are discovered
+  through agent-browser, and non-loopback CDP endpoints are rejected.
+- The optional real-browser E2E is validated against agent-browser 0.33.0.
+
 ### Source fan-out
 
 - Added named `targets` while preserving legacy one-sink configuration and the
