@@ -1,5 +1,16 @@
 # Changelog
 
+## [fork-v1.1.0-r1] - Unreleased
+
+### Source fan-out
+
+- Added named `targets` while preserving legacy one-sink configuration and the
+  official v1 wire protocol.
+- Each target uses an independent pairing key, timeout, Tailscale hostname
+  resolution, and optional source-side cookie policy.
+- `agentcookie source --target <name>` selects targets; without the flag, every
+  enabled target is attempted, and failures are aggregated after all attempts.
+
 ## [1.0.0] - 2026-08-13
 
 ### Featured: Mac to Linux continuous sync

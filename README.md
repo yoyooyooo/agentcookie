@@ -118,6 +118,31 @@ agentcookie wizard install --as source --peer <linux-tailscale-hostname>
 #   Waiting for sink to pair...
 ```
 
+### Multiple sinks (fork capability)
+
+A source can fan out one prepared cookie set to multiple independently paired
+sinks. Replace the legacy `sink` and `peer` fields with named `targets`:
+
+```yaml
+targets:
+  grok-bot:
+    url: http://grok-bot:9999/sync
+    peer: grok-bot
+  mini:
+    url: http://mini:9999/sync
+    peer: mini
+    policy: allowlist
+    domains:
+      - pattern: "tailscale.com"
+      - pattern: "%.tailscale.com"
+```
+
+Running `agentcookie source --once` pushes to every enabled target. Use
+`--target mini` to select one target. Every target has its own pairing key,
+source-side policy, Tailscale hostname resolution, timeout, and result; one
+failed target does not prevent attempts to the others. Existing one-sink
+`source.yaml` files remain supported and use the official wire protocol.
+
 ### Linux sink setup (featured: Grok Bot / trusted single-operator box)
 
 Do NOT run `wizard install --as sink` on Linux. The wizard omits the policy file, which means allowlist-empty (ship nothing). Instead, write the YAML files directly:
@@ -286,6 +311,7 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Working today
 
+- One source to many independently paired sinks, with optional target policies
 - Mac to Linux continuous sync via Tailscale `/sync`
 - Mac to Mac continuous sync (second Mac, Mac mini)
 - Live CDP injection on Linux (cookies go into Chrome's in-memory store)
@@ -308,7 +334,6 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 ### Not yet
 
-- One source to many sinks fan-out
 - Python reader library for the secrets bus
 - Signature verification on adoption manifests
 

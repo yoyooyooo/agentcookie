@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -203,6 +204,75 @@ domains:
 	}
 }
 
+func TestSourcePushFanoutSealsAndFiltersPerTarget(t *testing.T) {
+	fx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".tailscale.com", Name: "session", Value: "value", Path: "/"},
+		{HostKey: ".example.com", Name: "other", Value: "value", Path: "/"},
+	})
+	capture := newSourceCaptureForHosts(t, map[string]string{
+		"mini.test":  "mini-target-secret",
+		"other.test": "other-target-secret",
+	})
+	http.DefaultTransport = capture
+	restoreResolver := SetResolveSinkURLForTesting(func(_ context.Context, rawURL string) (string, error) {
+		return rawURL, nil
+	})
+	defer restoreResolver()
+
+	miniPolicy := &config.Blocklist{
+		Version: 1,
+		Policy:  config.CookiePolicyAllowlist,
+		Domains: []config.BlocklistEntry{{Pattern: "%.tailscale.com"}},
+	}
+	n, _, err := pushOnce(context.Background(), fx.cfg, &config.Blocklist{Version: 1}, fx.key, []sourcePushTarget{
+		{Name: "mini", URL: "http://mini.test/sync", Secret: "mini-target-secret", Policy: miniPolicy},
+		{Name: "other", URL: "http://other.test/sync", Secret: "other-target-secret"},
+	}, false, false, false)
+	if err != nil {
+		t.Fatalf("fanout push: %v", err)
+	}
+	if n != 2 || capture.batchCount() != 2 {
+		t.Fatalf("fanout result cookies=%d batches=%d", n, capture.batchCount())
+	}
+	if got := hostsFromChromeCookies(capture.batchAt(0)); !reflect.DeepEqual(got, []string{".tailscale.com"}) {
+		t.Fatalf("mini target hosts=%v", got)
+	}
+	if got := hostsFromChromeCookies(capture.batchAt(1)); !reflect.DeepEqual(got, []string{".example.com", ".tailscale.com"}) {
+		t.Fatalf("other target hosts=%v", got)
+	}
+}
+
+func TestFanoutEnvelopeIsAcceptedByOfficialV1Sink(t *testing.T) {
+	realTransport := http.DefaultTransport
+	sourceFx := newSourcePushFixture(t, []chrome.Cookie{
+		{HostKey: ".example.com", Name: "session", Value: "value", Path: "/"},
+	})
+	http.DefaultTransport = realTransport
+
+	sinkFx := newSinkHandlerFixture(t, true)
+	server := httptest.NewServer(sinkFx.mux)
+	defer server.Close()
+	restoreResolver := SetResolveSinkURLForTesting(func(_ context.Context, rawURL string) (string, error) {
+		return rawURL, nil
+	})
+	defer restoreResolver()
+
+	n, _, err := pushOnce(context.Background(), sourceFx.cfg, &config.Blocklist{Version: 1}, sourceFx.key, []sourcePushTarget{{
+		Name:   "official-v1-sink",
+		URL:    server.URL + "/sync",
+		Secret: sinkFx.secret,
+	}}, false, false, false)
+	if err != nil {
+		t.Fatalf("push to official sink handler: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("pushed cookies = %d, want 1", n)
+	}
+	if sinkFx.sinkState.LastWriteCount != 1 || sinkFx.sinkState.LastWriteMode != "dry-run" {
+		t.Fatalf("official sink state = %+v", sinkFx.sinkState)
+	}
+}
+
 func TestCookiesOnlyDoesNotShipSecretsBus(t *testing.T) {
 	fx := newSourcePushFixture(t, []chrome.Cookie{
 		{HostKey: ".example.com", Name: "session", Value: "value", Path: "/"},
@@ -266,7 +336,7 @@ func newSourcePushFixture(t *testing.T, cookies []chrome.Cookie) *sourcePushFixt
 }
 
 func (f *sourcePushFixture) push() (int, error) {
-	return pushWithFreshBlocklist(context.Background(), f.cfg, f.key, f.secret, false, false, false, f.srcState, nil)
+	return pushWithFreshBlocklist(context.Background(), f.cfg, f.key, []sourcePushTarget{{Name: "legacy", URL: f.cfg.Sink.URL, Secret: f.secret}}, false, false, false, f.srcState, nil)
 }
 
 func (f *sourcePushFixture) batchCount() int {
@@ -279,6 +349,7 @@ func (f *sourcePushFixture) hostsAt(i int) []string {
 
 type sourceCapture struct {
 	secret        string
+	secretsByHost map[string]string
 	mu            sync.Mutex
 	batches       [][]chrome.Cookie
 	secretsCounts []int
@@ -289,6 +360,11 @@ func newSourceCapture(t *testing.T, secret string) *sourceCapture {
 	return &sourceCapture{secret: secret}
 }
 
+func newSourceCaptureForHosts(t *testing.T, secrets map[string]string) *sourceCapture {
+	t.Helper()
+	return &sourceCapture{secretsByHost: secrets}
+}
+
 func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.Method != http.MethodPost {
 		return nil, fmt.Errorf("unexpected method %s", req.Method)
@@ -297,7 +373,11 @@ func (c *sourceCapture) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
 	}
-	plaintext, err := transport.OpenWithSecret(sealed, c.secret)
+	secret := c.secret
+	if c.secretsByHost != nil {
+		secret = c.secretsByHost[req.URL.Host]
+	}
+	plaintext, err := transport.OpenWithSecret(sealed, secret)
 	if err != nil {
 		return nil, fmt.Errorf("open payload: %w", err)
 	}
