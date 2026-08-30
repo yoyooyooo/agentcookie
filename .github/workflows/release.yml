@@ -58,6 +58,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: create ephemeral SemVer view for GoReleaser
+        env:
+          SEMVER_TAG: ${{ needs.prepare.outputs.semver_tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git tag -a "$SEMVER_TAG" -m "Ephemeral GoReleaser view for $GITHUB_REF_NAME" "$SOURCE_SHA"
+          [[ "$(git rev-list -n 1 "$SEMVER_TAG")" == "$SOURCE_SHA" ]]
+
       - name: install arm64 cross-compiler
         run: |
           sudo apt-get update
@@ -103,6 +112,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: create ephemeral SemVer view for GoReleaser
+        env:
+          SEMVER_TAG: ${{ needs.prepare.outputs.semver_tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git tag -a "$SEMVER_TAG" -m "Ephemeral GoReleaser view for $GITHUB_REF_NAME" "$SOURCE_SHA"
+          [[ "$(git rev-list -n 1 "$SEMVER_TAG")" == "$SOURCE_SHA" ]]
 
       - id: signing
         name: select explicit Darwin signing mode

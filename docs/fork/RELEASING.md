@@ -39,9 +39,10 @@ A pushed `fork-v*` tag starts the release workflow. The prepare job rejects a
 tag unless it matches `fork-vX.Y.Z-rN`, is annotated, and peels to the exact
 workflow SHA.
 
-GoReleaser requires SemVer, so CI presents the derived `vX.Y.Z-rN` only to its
-version parser while injecting the full immutable fork tag into the binary and
-archive name. The Git and GitHub release authority remains `fork-vX.Y.Z-rN`.
+GoReleaser requires SemVer, so each ephemeral CI checkout creates a local-only
+`vX.Y.Z-rN` view tag on the already-validated source SHA. That view tag is never
+pushed. CI injects the full immutable fork tag into the binary and archive name;
+the only Git and GitHub release authority remains `fork-vX.Y.Z-rN`.
 
 Linux archives are unsigned and integrity-bound by SHA-256. Darwin release mode
 is explicit:
