@@ -434,7 +434,7 @@ func stopChrome(ctx context.Context, timeout time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("realchrome: locate Chrome for graceful SIGTERM fallback: %w", err)
 	}
-	for _, line := range strings.Fields(string(out)) {
+	for line := range strings.FieldsSeq(string(out)) {
 		pid, err := strconv.Atoi(line)
 		if err != nil {
 			continue

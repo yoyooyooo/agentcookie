@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -82,6 +83,9 @@ func TestInspectDisabledEndpoint(t *testing.T) {
 }
 
 func TestOfflineInjectRestoresRunningChrome(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("offline ordinary Chrome delivery is macOS-only")
+	}
 	dir := t.TempDir()
 	cookiesPath := filepath.Join(dir, "Default", "Cookies")
 	if err := os.MkdirAll(filepath.Dir(cookiesPath), 0o700); err != nil {
