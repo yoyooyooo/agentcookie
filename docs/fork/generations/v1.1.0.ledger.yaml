@@ -9,9 +9,9 @@ generation:
     tag_object_sha: 87103215be1f239b52599039c1f48618dcd5a5f1
     sha: 97dd731250b0d9a340f2d0fa776346d807335d60
   accepted_source:
-    sha: 5724ee6d90bdfd97fa17369d8cfeb4e7e1f3fbba
-    tag: fork-v1.1.0-r4
-    tag_object_sha: e04d99c781be81b018b2c71dd4e429f0e2c2a6bd
+    sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
+    tag: fork-v1.1.0-r5
+    tag_object_sha: 8af2efbb825154b79467c8bc9e91fd6c8650bfb7
     accepted_at: 2026-08-30
 
 deltas:
@@ -296,6 +296,53 @@ deltas:
       - go vet ./...
       - Mini ordinary Google Chrome 149 reached the authenticated Tailscale DNS console after live injection; Fortress and temporary Agent Browser processes were excluded
 
+  - id: unattended-ordinary-google-chrome-delivery
+    title: Deliver into ordinary Chrome without a visible DevTools approval dialog
+    category: fix
+    prior_commits: []
+    decision: rework
+    reason: r5 live mode is correct for visible desktops, but Chrome 149 requires an interactive approval dialog on every new connection and rejects legacy plain-v10 cold writes. Unattended macOS needs a Chrome-specific host-bound offline write.
+    accepted_commits:
+      - 7d09916ee8719f5bc9b17cf3cc22047528991331
+      - c53fedea2660b6ad71413027a1a1ab7d167466a7
+    evidence:
+      - internal/chrome/write_appbound.go
+      - internal/chrome/write_appbound_test.go
+      - internal/realchrome/realchrome.go
+      - internal/realchrome/realchrome_test.go
+      - docs/ordinary-chrome.md
+    dependencies: [ordinary-google-chrome-delivery]
+    migration_impact: set real_chrome.mode to offline on unattended macOS; Chrome briefly restarts only when it was already running; run agentcookie chrome disable after retiring live mode
+    replay_branch: fix/ordinary-chrome-offline-v1.1.0
+    verification:
+      - go test ./...
+      - go test -race ./...
+      - go vet ./...
+      - Linux amd64 full suite after platform-gating the macOS runtime fixture
+      - real Chrome 149 Default Profile retained Facebook c_user/xs and Xiaohongshu web_session across a cold load
+      - OpenCLI Facebook whoami and a login-required Xiaohongshu collection succeeded after offline delivery
+
+  - id: stable-darwin-codesign-identifier
+    title: Keep one macOS firewall and privacy identity across ad-hoc release revisions
+    category: operations
+    prior_commits: []
+    decision: rework
+    reason: content-hash-only ad-hoc designated requirements make every release look like a different inbound-listening application. A stable identifier and designated requirement preserve identity after the first approval.
+    accepted_commits:
+      - 7d09916ee8719f5bc9b17cf3cc22047528991331
+    evidence:
+      - scripts/sign.sh
+      - .github/workflows/ci.yml
+      - .github/workflows/release.yml
+      - docs/fork/RELEASING.md
+    dependencies: [reproducible-fork-release-artifacts]
+    migration_impact: first direct-listener install under the stable identifier may require one firewall approval; later revisions retain it
+    replay_branch: fix/ordinary-chrome-offline-v1.1.0
+    verification:
+      - codesign --verify --strict
+      - codesign designated requirement equals identifier io.github.yoyooyooo.agentcookie
+      - hosted macOS signing gate on the final candidate
+
 release_tags:
   - name: fork-v1.1.0-r1
     tag_object_sha: c57ff47521b8ba9528547c67e23914781a1dd289
@@ -315,37 +362,42 @@ release_tags:
   - name: fork-v1.1.0-r4
     tag_object_sha: e04d99c781be81b018b2c71dd4e429f0e2c2a6bd
     source_sha: 5724ee6d90bdfd97fa17369d8cfeb4e7e1f3fbba
+    status: superseded-for-deployment
+    immutable: true
+  - name: fork-v1.1.0-r5
+    tag_object_sha: 8af2efbb825154b79467c8bc9e91fd6c8650bfb7
+    source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
     status: active-artifact-and-deployment-authority
     immutable: true
 
 verification_runs:
-  accepted_source_sha: 5724ee6d90bdfd97fa17369d8cfeb4e7e1f3fbba
+  accepted_source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
   github:
-    ci: {id: 33301548966, conclusion: success}
-    lint: {id: 33301549077, conclusion: success}
-    govulncheck: {id: 33301548933, conclusion: success}
-    release: {id: 33301650124, conclusion: success}
+    ci: {id: 33312472992, conclusion: success}
+    lint: {id: 33312472958, conclusion: success}
+    govulncheck: {id: 33312473009, conclusion: success}
+    release: {id: 33312626157, conclusion: success}
   release_artifact:
     status: published
-    url: https://github.com/yoyooyooo/agentcookie/releases/tag/fork-v1.1.0-r4
+    url: https://github.com/yoyooyooo/agentcookie/releases/tag/fork-v1.1.0-r5
     public_download_verification: pass
     manifest:
       schema_version: 1
-      tag: fork-v1.1.0-r4
-      source_sha: 5724ee6d90bdfd97fa17369d8cfeb4e7e1f3fbba
+      tag: fork-v1.1.0-r5
+      source_sha: 63b8ace94d85e65a738d92ba5fa966c77a1f94dd
       upstream_tag: v1.1.0
       upstream_sha: 97dd731250b0d9a340f2d0fa776346d807335d60
       darwin: {signing_mode: adhoc, notarized: false}
       linux: {signing_mode: unsigned, notarized: false}
     archives:
-      - name: agentcookie_fork-v1.1.0-r4_darwin_amd64.tar.gz
-        sha256: c359ab7cfd35c09bf088387a930dcb32e0b106b55405a344bb51adb6ed6c148b
-      - name: agentcookie_fork-v1.1.0-r4_darwin_arm64.tar.gz
-        sha256: 5b52a6ca89c3ca497ff104c5496681d8a404694c7a101cc33f32282aa1265699
-      - name: agentcookie_fork-v1.1.0-r4_linux_amd64.tar.gz
-        sha256: 6941d9db0a1e69fd48935d9eb56f8810a3361cbcd04f81c0f08e970425791015
-      - name: agentcookie_fork-v1.1.0-r4_linux_arm64.tar.gz
-        sha256: 900198758191bca8cd82f49528e525d8f8d026b04e1520f06816edf709525e2d
+      - name: agentcookie_fork-v1.1.0-r5_darwin_amd64.tar.gz
+        sha256: 01e6cfc2476a3683a327905f879bf829fc0bdc1b155cc351b890077a88ce7f6a
+      - name: agentcookie_fork-v1.1.0-r5_darwin_arm64.tar.gz
+        sha256: 72ccab3fcd5a9c55f0f0e7c1770d1c1e7b792ee6deca9fce1fa95704cafa7b43
+      - name: agentcookie_fork-v1.1.0-r5_linux_amd64.tar.gz
+        sha256: e2155ca131dfbb7b243f33ad675964833a79354524c592c65ed5ea1376dc42f9
+      - name: agentcookie_fork-v1.1.0-r5_linux_arm64.tar.gz
+        sha256: e7e27efaa702dac84253be90387c3fbb970ce743dc7d520950bf99965a41a15b
 
 deployment_validation:
   evidence_scope: public-role-level
