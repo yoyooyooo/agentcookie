@@ -139,3 +139,55 @@ deltas:
     verification:
       - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=10
       - go test -race ./...
+
+  - id: explicit-official-sink-test-policy
+    title: Make the official sink compatibility fixture platform-independent
+    category: test
+    prior_commits: []
+    decision: keep
+    reason: Linux intentionally defaults a missing policy to an empty allowlist, while Darwin defaults to blocklist/sync-all. A wire compatibility test must state trusted sync-all explicitly.
+    evidence:
+      - internal/cli/source_test.go
+    dependencies: [source-fanout]
+    migration_impact: none
+    replay_branch: fix/linux-sink-compat-test-v1.1.0
+    verification:
+      - Linux amd64 go test ./...
+
+  - id: root-execute-test-portability
+    title: Test unix.Access using the current process credential semantics
+    category: test
+    prior_commits: []
+    decision: rework
+    reason: POSIX root may execute a regular file when any execute bit is set. The upstream test incorrectly assumed every runner is a non-root file owner; production unix.Access behavior remains unchanged.
+    evidence:
+      - internal/sinkpush/find_cli_test.go
+      - internal/sinkpush/find_cli_permissions_unix_test.go
+      - internal/sinkpush/find_cli_permissions_other_test.go
+    dependencies: []
+    migration_impact: none
+    replay_branch: fix/root-exec-permission-test-v1.1.0
+    verification:
+      - Linux amd64 go test ./...
+      - GitHub ci run 33290928830
+    retirement_condition: Retire when an official release contains equivalent root/non-root test semantics.
+
+  - id: github-actions-node24
+    title: Run fork CI on maintained Node 24 action runtimes
+    category: operations
+    prior_commits: []
+    decision: keep
+    reason: GitHub deprecated the Node 20 runtimes used by checkout v4 and setup-go v5. Official v6 action tags provide Node 24 support.
+    evidence:
+      - .github/workflows/ci.yml
+      - .github/workflows/lint.yml
+      - .github/workflows/govulncheck.yml
+      - .github/workflows/release.yml
+    dependencies: []
+    migration_impact: none
+    replay_branch: chore/actions-node24-v1.1.0
+    verification:
+      - actionlint
+      - GitHub ci run 33291078262
+      - GitHub lint run 33291078269
+      - GitHub govulncheck run 33291078261
