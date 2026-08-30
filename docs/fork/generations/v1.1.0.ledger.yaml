@@ -1,0 +1,108 @@
+generation:
+  old_ref: origin/feat/dia-adapter
+  old_baseline:
+    tag: v1.0.0
+    sha: e498e93bcaac867386dfba12ea709882dff037ba
+  new_ref: fork/v1.1.0
+  new_baseline:
+    tag: v1.1.0
+    tag_object_sha: 87103215be1f239b52599039c1f48618dcd5a5f1
+    sha: 97dd731250b0d9a340f2d0fa776346d807335d60
+
+deltas:
+  - id: dia-source-adapter
+    title: Read the authoritative Dia Chromium profile on macOS
+    category: feature
+    prior_commits: [d462f4c6df951147b5d225a4acce5c97c3bfcc13]
+    decision: keep
+    reason: Upstream v1.1.0 still has no Dia browser descriptor or Keychain mapping.
+    evidence:
+      - internal/chrome/browser.go
+      - internal/chrome/browser_test.go
+    dependencies: []
+    migration_impact: none
+    replay_branch: feature/dia-v1.1.0
+    verification:
+      - go test ./internal/chrome ./internal/config ./internal/cli
+
+  - id: strict-cookies-only
+    title: Exclude non-Cookie browser and secrets surfaces
+    category: feature
+    prior_commits: [84e51d5c581e22c9b78da3c6bc0934bced634e31]
+    decision: rework
+    reason: The old commit skipped Local Storage and IndexedDB but still read and shipped the secrets bus; the requested boundary is Cookie-only.
+    evidence:
+      - internal/cli/source.go
+      - internal/cli/source_test.go
+    dependencies: [dia-source-adapter]
+    migration_impact: none
+    replay_branch: fix/cookies-only-boundary-v1.1.0
+    verification:
+      - go test ./internal/cli -run TestCookiesOnlyDoesNotShipSecretsBus
+
+  - id: source-fanout
+    title: Push one prepared Cookie set to independently paired named sinks
+    category: feature
+    prior_commits: [6444ff78029e84ae4574f243fb65ba5f53757a43]
+    decision: rework
+    reason: Fan-out remains required, but every target must retain upstream v1.1.0 Tailscale hostname resolution and the old commit bundled unrelated sink behavior.
+    evidence:
+      - internal/config/fanout_test.go
+      - internal/cli/source_test.go
+      - official sink handler compatibility test
+    dependencies: [strict-cookies-only]
+    migration_impact: none
+    replay_branch: feature/fanout-v1.1.0
+    verification:
+      - go test ./...
+      - go test -race ./internal/config ./internal/cli
+      - go vet ./...
+
+  - id: live-cdp-only-sink
+    title: Keep accepted Cookie state only in a running sink browser
+    category: feature
+    prior_commits: [6444ff78029e84ae4574f243fb65ba5f53757a43]
+    decision: retire
+    reason: Fixed Chrome should retain the official sink materialization paths, while temporary Agent Browser instances receive explicit per-session injection. The memory-only sink prevents later on-demand sessions from reading the official sidecar.
+    evidence:
+      - internal/cli/sink.go has no fork delta from v1.1.0
+      - docs/agent-browser-sessions.md
+    dependencies: []
+    migration_impact: none
+    verification:
+      - git diff v1.1.0..fork/v1.1.0 -- internal/cli/sink.go
+    retirement_condition: Retired in fork/v1.1.0; deployed live_cdp_only configs must migrate before installing this generation.
+
+  - id: persistent-context-syncer
+    title: Inject future BrowserContexts from a long-running sink process
+    category: feature
+    prior_commits: [6444ff78029e84ae4574f243fb65ba5f53757a43]
+    decision: retire
+    reason: Explicit session-scoped injection is deterministic, releases idle browser memory, and avoids granting every future context the same identity.
+    evidence:
+      - internal/cli/agent_browser.go
+      - internal/cli/agent_browser_e2e_test.go
+    dependencies: []
+    migration_impact: none
+    verification:
+      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=1
+
+  - id: named-agent-browser-session-injection
+    title: Inject the local authoritative Cookie set into one named Agent Browser session
+    category: feature
+    prior_commits: []
+    decision: keep
+    reason: All three operator machines require on-demand identity in independent temporary Agent Browser sessions.
+    evidence:
+      - docs/agent-browser-sessions.md
+      - internal/cli/agent_browser_test.go
+      - internal/cli/agent_browser_e2e_test.go
+      - pkg/sidecar/reader_test.go
+    dependencies: [dia-source-adapter, source-fanout]
+    migration_impact: none
+    replay_branch: feature/agent-browser-session-inject-v1.1.0
+    verification:
+      - go test ./...
+      - go test -race ./pkg/sidecar ./internal/livecdp ./internal/cli
+      - go vet ./...
+      - AGENTCOOKIE_AGENT_BROWSER_E2E=1 go test ./internal/cli -run '^TestAgentBrowserSessionInjectE2E$' -count=1

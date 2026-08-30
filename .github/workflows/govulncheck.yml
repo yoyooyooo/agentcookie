@@ -7,8 +7,13 @@ name: govulncheck
 # dependency-presence hygiene rather than reachable-vulnerability blocking.
 
 on:
+  push:
+    branches:
+      - "fork/**"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "fork/**"
   workflow_dispatch:
 
 permissions:

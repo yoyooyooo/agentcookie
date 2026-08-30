@@ -29,6 +29,10 @@
 #   --tarball <path>           Use a local tarball instead of fetching
 #                              the latest release.
 #
+# Environment:
+#   AGENTCOOKIE_REPO           Release repository. Defaults to this maintained
+#                              fork (`yoyooyooo/agentcookie`).
+#
 # Design notes:
 #   - Bash, not Go. Friends will read 80 lines of Bash; they will not
 #     read a 17 MB binary.
@@ -51,7 +55,7 @@ EXTRA_BINS=()
 BIN_DIR=""
 TARBALL=""
 
-REPO="mvanhorn/agentcookie"
+REPO="${AGENTCOOKIE_REPO:-yoyooyooo/agentcookie}"
 
 # ---- helpers ----
 

@@ -1,5 +1,10 @@
 # agentcookie
 
+> This repository is a maintained fork. `main` mirrors the official project;
+> fork capabilities live on versioned `fork/vX.Y.Z` generations. The active
+> generation policy and delta ledger are documented in
+> [`docs/fork/POLICY.md`](docs/fork/POLICY.md).
+
 Your agent runs on a Linux box (a Grok Bot VM, a cloud agent runtime, a homelab server) and needs to act as you on every site you're already logged into. agentcookie keeps that box's Chrome session in sync with your Mac's, continuously, encrypted over your Tailscale tailnet, with zero per-site auth ceremony.
 
 Cookie-authenticated sites show the logged-in UI after live CDP inject. Google/Workspace sessions stay logged out unless a human signed in on the box (DBSC binds those sessions to device keys). browserUse, Puppeteer, Playwright, or any Chromium automation that connects to Chrome's debug port sees your non-DBSC sessions already there.
@@ -59,13 +64,32 @@ agentcookie source --watch
 No Keychain on Linux. No Chrome SQLite rewrite. Just live CDP injection.
 ```
 
-The sink injects cookies directly into Chrome's in-memory store via the Chrome DevTools Protocol. Chrome on the Linux box must be started with `--remote-debugging-port=9223` (or another port you configure). The inject happens on every sync and on every new browser context, so an agent that launches a fresh tab inherits the session immediately.
+The sink injects cookies directly into a fixed Chrome's in-memory store via the Chrome DevTools Protocol. Chrome on the Linux box must be started with `--remote-debugging-port=9223` (or another configured loopback port). Isolated Agent Browser instances use the explicit named-session injection command described below; they do not require this fixed Chrome to remain open.
 
 ## Install
 
-### Download release binaries
+### Maintained fork generation
 
-From the [GitHub Releases](https://github.com/mvanhorn/agentcookie/releases/tag/v1.0.0) page, download the archive for your platform:
+Until an immutable `fork-v*` release asset is published, build from the active
+generation clone. The module path intentionally remains upstream-compatible,
+so do not use the fork URL with `go install`:
+
+```bash
+git clone --branch fork/v1.1.0 git@github.com:yoyooyooo/agentcookie.git
+cd agentcookie
+make build
+install -m 0755 ./bin/agentcookie ~/.local/bin/agentcookie
+```
+
+Use the same accepted generation on every machine that needs named Agent
+Browser session injection. Exact release, checksum, signing, and deployment
+rules are in [the fork release runbook](docs/fork/RELEASING.md).
+
+### Official upstream binaries
+
+The following official `v1.0.0` binaries provide the upstream source/sink
+experience but do not include Dia fan-out or named-session injection. From the
+[official GitHub Releases](https://github.com/mvanhorn/agentcookie/releases/tag/v1.0.0) page, download the archive for your platform:
 
 | Platform | Archive |
 |----------|---------|
@@ -93,7 +117,7 @@ tar -xzf agentcookie_1.0.0_linux_amd64.tar.gz
 sudo mv agentcookie /usr/local/bin/
 ```
 
-Or build from source after the tag:
+Or install the official upstream version from source:
 
 ```bash
 go install github.com/mvanhorn/agentcookie/cmd/agentcookie@v1.0.0
@@ -360,6 +384,8 @@ The secrets bus (bearer tokens, API keys, OAuth refresh tokens) is untouched by 
 
 | Doc | Use |
 |---|---|
+| [Fork policy](docs/fork/POLICY.md) | upstream mirror, generation, CI, and immutable release rules |
+| [Fork generation v1.1.0](docs/fork/generations/v1.1.0.md) | baseline, delta decisions, verification, and deployment receipts |
 | [Agent Browser sessions](docs/agent-browser-sessions.md) | inject current source/sink cookies into one named temporary session |
 | [Architecture](docs/architecture.md) | module layout, sync lifecycle, security boundaries |
 | [Protocol v1](docs/protocol.md) | wire format spec for future client implementations |

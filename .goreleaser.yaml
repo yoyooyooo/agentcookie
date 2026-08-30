@@ -31,6 +31,10 @@ archives:
     files:
       - LICENSE
       - README.md
+      - docs/agent-browser-sessions.md
+      - docs/fork/POLICY.md
+      - docs/fork/RELEASING.md
+      - docs/fork/generations/v1.1.0.md
       - docs/quickstart.md
       - docs/threat-model.md
       - docs/architecture.md

@@ -3,7 +3,7 @@ name: release
 on:
   push:
     tags:
-      - "v*"
+      - "fork-v*"
 
 permissions:
   contents: write
@@ -59,8 +59,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: validate fork signing configuration
+        env:
+          SIGN_IDENTITY: ${{ vars.AGENTCOOKIE_SIGN_IDENTITY }}
+          APPLE_ID: ${{ vars.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.AC_NOTARY_PASSWORD }}
+        run: |
+          test -n "$SIGN_IDENTITY" || { echo "missing repository variable AGENTCOOKIE_SIGN_IDENTITY" >&2; exit 1; }
+          test -n "$APPLE_ID" || { echo "missing repository variable APPLE_ID" >&2; exit 1; }
+          test -n "$APPLE_TEAM_ID" || { echo "missing repository variable APPLE_TEAM_ID" >&2; exit 1; }
+          test -n "$NOTARY_PASSWORD" || { echo "missing secret AC_NOTARY_PASSWORD" >&2; exit 1; }
+
       - name: import Developer ID cert
-        if: ${{ secrets.CERTIFICATE_OSX_APPLICATION != '' }}
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.CERTIFICATE_OSX_APPLICATION }}
@@ -70,14 +81,16 @@ jobs:
         run: security find-identity -v -p codesigning
 
       - name: setup notarytool credentials
-        if: ${{ secrets.AC_NOTARY_PASSWORD != '' }}
         run: |
-          xcrun notarytool store-credentials agentcookie-notary \
-            --apple-id mvanhorn@gmail.com \
-            --team-id NM8VT393AR \
+          xcrun notarytool store-credentials agentcookie-fork-notary \
+            --apple-id "${{ vars.APPLE_ID }}" \
+            --team-id "${{ vars.APPLE_TEAM_ID }}" \
             --password "${{ secrets.AC_NOTARY_PASSWORD }}"
 
       - name: make release
+        env:
+          AGENTCOOKIE_SIGN_IDENTITY: ${{ vars.AGENTCOOKIE_SIGN_IDENTITY }}
+          AGENTCOOKIE_NOTARY_PROFILE: agentcookie-fork-notary
         run: make release
 
       - name: build release tarball
@@ -127,7 +140,7 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             dist/*.tar.gz \
             dist/checksums.txt \
-            --title "agentcookie ${{ github.ref_name }}" \
+            --title "agentcookie fork ${{ github.ref_name }}" \
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
